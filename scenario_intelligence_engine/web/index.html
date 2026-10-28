@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PRISMSTRAT | Counterfactual Scenario Intelligence & Strategy Simulator</title>
+  <meta name="description" content="Enterprise scenario stress-testing and counterfactual decision simulation engine with multi-month crisis profiling and toggle permutations.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+
+    <!-- Top Application Header -->
+    <header class="app-header">
+      <div class="brand-section">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        </div>
+        <div>
+          <h1 class="brand-title">PRISMSTRAT</h1>
+          <div class="brand-subtitle" id="company-meta">AAPL • NASDAQ • Consumer technology • Currency: USD</div>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <div class="company-selector-wrap">
+          <span class="select-label">Target Corporate Baseline</span>
+          <select id="company-select" class="styled-select">
+            <option value="AAPL">Apple Inc. (AAPL - Tech)</option>
+            <option value="NKE">Nike, Inc. (NKE - Retail & Apparel)</option>
+            <option value="JPM">JPMorgan Chase (JPM - Banking)</option>
+            <option value="TSLA">Tesla, Inc. (TSLA - Automotive)</option>
+          </select>
+        </div>
+
+        <button id="btn-view-schema" class="header-action-btn">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm15 2h-4v3h4V4zm0 4h-4v3h4V8zm0 4h-4v3h3a1 1 0 0 0 1-1v-2zm-5 3v-3H6v3h4zm-5 0v-3H1v2a1 1 0 0 0 1 1h3zm-4-4h4V8H1v3zm0-4h4V4H1v3zm5-3v3h4V4H6zm4 4H6v3h4V8z"/></svg>
+          16-Table Schema
+        </button>
+
+        <button id="btn-calibrate" class="header-action-btn primary">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm3.5 7.5a.5.5 0 0 1 0 1H5.707l2.147 2.146a.5.5 0 0 1-.708.708l-3-3a.5.5 0 0 1 0-.708l3-3a.5.5 0 1 1 .708.708L5.707 7.5H11.5z"/></svg>
+          Calibrate & Train (CP 5)
+        </button>
+      </div>
+    </header>
+
+    <!-- Preset Permutation Quick Chips -->
+    <div class="presets-bar">
+      <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-right: 4px;">Strategic Presets:</span>
+      <button class="preset-chip" onclick="applyPreset(0)">Baseline (Status Quo)</button>
+      <button class="preset-chip" onclick="applyPreset(1)">COVID-19 Shock</button>
+      <button class="preset-chip" onclick="applyPreset(2)">COVID + Layoffs & Capex Freeze</button>
+      <button class="preset-chip" onclick="applyPreset(3)">COVID + Emergency Credit Line</button>
+      <button class="preset-chip" onclick="applyPreset(4)">9/11 Geopolitical Disruption</button>
+      <button class="preset-chip" onclick="applyPreset(5)">9/11 + Pricing & Cost Cuts</button>
+      <button class="preset-chip" onclick="applyPreset(6)">2008 Credit Crunch</button>
+      <button class="preset-chip" onclick="applyPreset(7)">Macro Stagflation Cycle</button>
+      <button class="preset-chip" onclick="applyPreset(8)">Black Swan Compounded Stress</button>
+    </div>
+
+    <!-- Executive KPI Grid (Instantly updates on toggle click) -->
+    <section class="kpi-grid">
+      <div class="kpi-card" id="kpi-card-rev">
+        <div class="kpi-title">24-Mo Cumulative Revenue</div>
+        <div class="kpi-value" id="kpi-revenue">$0.0B</div>
+        <div class="kpi-sub">
+          <span class="kpi-delta pos" id="kpi-rev-delta">+0.0% vs Base</span>
+          <span style="color: var(--text-muted); font-size: 11px;">Top-line Volume</span>
+        </div>
+      </div>
+
+      <div class="kpi-card" id="kpi-card-ni">
+        <div class="kpi-title">Cumulative Net Income</div>
+        <div class="kpi-value" id="kpi-net-income">$0.00B</div>
+        <div class="kpi-sub">
+          <span class="kpi-delta pos" id="kpi-ni-delta">+0.0% vs Base</span>
+          <span style="color: var(--text-muted); font-size: 11px;">Net Profit Margin</span>
+        </div>
+      </div>
+
+      <div class="kpi-card" id="kpi-card-runway">
+        <div class="kpi-title">Solvency & Cash Runway</div>
+        <div class="kpi-value" id="kpi-runway">Self-Sustaining</div>
+        <div class="kpi-sub">
+          <span style="color: var(--accent-cyan); font-weight: 600;" id="kpi-min-cash">Min Cash: $0.0B</span>
+        </div>
+      </div>
+
+      <div class="kpi-card" id="kpi-card-mcap">
+        <div class="kpi-title">Terminal Market Cap</div>
+        <div class="kpi-value" id="kpi-mcap">$0.0B</div>
+        <div class="kpi-sub">
+          <span class="kpi-delta pos" id="kpi-mcap-delta">+0.0%</span>
+          <span style="color: var(--text-muted); font-size: 11px;">Implied Valuation</span>
+        </div>
+      </div>
+
+      <div class="kpi-card" id="kpi-card-altman">
+        <div class="kpi-title">Balance Sheet Health</div>
+        <div style="margin-top: 8px;">
+          <span class="status-pill safe" id="kpi-altman-badge">Z: 4.85 (Solid)</span>
+        </div>
+        <div class="kpi-sub" style="margin-top: 10px;">
+          <span style="color: var(--text-muted); font-size: 11px;">Altman Z-Score Rating</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Studio Layout: Left Toggles | Right Visualizations -->
+    <main class="studio-layout">
+
+      <!-- Left Sidebar: Permutation Toggles (Checkpoints 3 & 4) -->
+      <aside class="toggle-sidebar">
+
+        <!-- Group A: Special Events (Historical & Tail Risk) -->
+        <div class="panel-group">
+          <div class="panel-section-title">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3.5a.5.5 0 0 1-.5-.5v-4A.5.5 0 0 1 8 4z"/></svg>
+            Special Events (Multi-Month Dynamic)
+          </div>
+
+          <label class="toggle-item" for="toggle-covid">
+            <div class="toggle-meta">
+              <div class="toggle-name">COVID-19 Pandemic Shock</div>
+              <div class="toggle-desc">24-month empirical wave: lockdown trough, stimulus boom, freight spike, inflation.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-covid" class="scenario-toggle" data-key="enable_covid">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-911">
+            <div class="toggle-meta">
+              <div class="toggle-name">9/11 Geopolitical Shock</div>
+              <div class="toggle-desc">Airspace closure, travel halt, security friction & emergency Fed rate cuts.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-911" class="scenario-toggle" data-key="enable_911">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-2008">
+            <div class="toggle-meta">
+              <div class="toggle-name">2008 Financial Crisis (GFC)</div>
+              <div class="toggle-desc">Lehman collapse, counterparty freeze, commercial paper shutdown.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-2008" class="scenario-toggle" data-key="enable_2008_crisis">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-stagflation">
+            <div class="toggle-meta">
+              <div class="toggle-name">Stagflation / Rapid Rate Hikes</div>
+              <div class="toggle-desc">Consecutive +75bps rate hikes, multiple compression (P/E contraction).</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-stagflation" class="scenario-toggle" data-key="enable_stagflation_rates">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-supply">
+            <div class="toggle-meta">
+              <div class="toggle-name">Supply Chain Crunch</div>
+              <div class="toggle-desc">Semiconductor chip shortage, port logjams & raw material cost surge.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-supply" class="scenario-toggle" data-key="enable_supply_chain_crunch">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-geo">
+            <div class="toggle-meta">
+              <div class="toggle-name">Geopolitical Energy Conflict</div>
+              <div class="toggle-desc">Oil/gas embargoes, shipping lane disruption, elevated risk premium.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-geo" class="scenario-toggle" data-key="enable_geopolitical_conflict">
+              <span class="slider"></span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Group B: Macroeconomic Conditions -->
+        <div class="panel-group">
+          <div class="panel-section-title">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M1 11a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-4zm6-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V7zm6-5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V2z"/></svg>
+            Macro Conditions & Calendar
+          </div>
+
+          <label class="toggle-item" for="toggle-macro-inflation">
+            <div class="toggle-meta">
+              <div class="toggle-name">High CPI Inflation (+5.5%)</div>
+              <div class="toggle-desc">Raw materials & logistics cost escalation.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-macro-inflation" class="scenario-toggle" data-key="macro_high_inflation">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-macro-rates">
+            <div class="toggle-meta">
+              <div class="toggle-name">Rate Hike (+300 bps)</div>
+              <div class="toggle-desc">Aggressive tightening; increases borrowing debt servicing.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-macro-rates" class="scenario-toggle" data-key="macro_rate_hike_300bps">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-macro-recession">
+            <div class="toggle-meta">
+              <div class="toggle-name">Severe Recession (GDP -3.5%)</div>
+              <div class="toggle-desc">Demand contraction filtered via niche elasticity.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-macro-recession" class="scenario-toggle" data-key="macro_severe_recession">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-macro-festive">
+            <div class="toggle-meta">
+              <div class="toggle-name">Festive Shopping Boom</div>
+              <div class="toggle-desc">Diwali / Black Friday calendar lift.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-macro-festive" class="scenario-toggle" data-key="macro_festive_boom">
+              <span class="slider"></span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Group C: Corporate Strategic Decisions (Interventions) -->
+        <div class="panel-group">
+          <div class="panel-section-title">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M7 14s-1 0-1-1 1-4 5-4 5 3 5 4-1 1-1 1H7zm4-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
+            Management Counterfactual Actions
+          </div>
+
+          <label class="toggle-item" for="toggle-dec-layoffs">
+            <div class="toggle-meta">
+              <div class="toggle-name">12% Layoffs & Cost Cut</div>
+              <div class="toggle-desc">Month 1 severance penalty; 12% recurring OpEx savings.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-dec-layoffs" class="scenario-toggle" data-key="decision_layoffs">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-dec-capex">
+            <div class="toggle-meta">
+              <div class="toggle-name">Freeze Capex by 50%</div>
+              <div class="toggle-desc">Immediately protects Free Cash Flow and runway.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-dec-capex" class="scenario-toggle" data-key="decision_capex_freeze">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-dec-credit">
+            <div class="toggle-meta">
+              <div class="toggle-name">Draw $5,000M Credit Facility</div>
+              <div class="toggle-desc">Emergency liquidity buffer against cash exhaustion.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-dec-credit" class="scenario-toggle" data-key="decision_emergency_credit_line">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-dec-price">
+            <div class="toggle-meta">
+              <div class="toggle-name">Price Increase (+7%)</div>
+              <div class="toggle-desc">Tests firm's pricing power vs customer volume churn.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-dec-price" class="scenario-toggle" data-key="decision_price_increase">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-dec-cost">
+            <div class="toggle-meta">
+              <div class="toggle-name">Supply Vendor Renegotiation</div>
+              <div class="toggle-desc">Direct 7.5% reduction in Cost of Goods Sold (COGS).</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-dec-cost" class="scenario-toggle" data-key="decision_cost_restructure">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-dec-buyback">
+            <div class="toggle-meta">
+              <div class="toggle-name">Halt Share Buybacks</div>
+              <div class="toggle-desc">Preserves cash buffer rather than repurchasing equity.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-dec-buyback" class="scenario-toggle" data-key="decision_halt_buybacks">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-dec-product">
+            <div class="toggle-meta">
+              <div class="toggle-name">Accelerate Product Launch</div>
+              <div class="toggle-desc">Upfront R&D spend in M1-3; market share lift from M4+.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-dec-product" class="scenario-toggle" data-key="decision_product_launch">
+              <span class="slider"></span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Group D: Peer & Market Spillover -->
+        <div class="panel-group">
+          <div class="panel-section-title">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V4zm2-1a1 1 0 0 0-1 1v1h14V4a1 1 0 0 0-1-1H2zm13 4H1v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7z"/></svg>
+            Competitive & Credit Spillover
+          </div>
+
+          <label class="toggle-item" for="toggle-peer-war">
+            <div class="toggle-meta">
+              <div class="toggle-name">Peer Aggressive Price War</div>
+              <div class="toggle-desc">Competitor discounting creates 8% revenue drag.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-peer-war" class="scenario-toggle" data-key="peer_price_war">
+              <span class="slider"></span>
+            </div>
+          </label>
+
+          <label class="toggle-item" for="toggle-credit-down">
+            <div class="toggle-meta">
+              <div class="toggle-name">Credit Rating Downgrade</div>
+              <div class="toggle-desc">Spreads widen +175 bps; increases borrowing burden.</div>
+            </div>
+            <div class="switch">
+              <input type="checkbox" id="toggle-credit-down" class="scenario-toggle" data-key="credit_rating_downgrade">
+              <span class="slider"></span>
+            </div>
+          </label>
+        </div>
+
+      </aside>
+
+      <!-- Right Main: Dynamic Multi-Graph Dashboard -->
+      <section class="charts-main">
+
+        <!-- Chart 1: Financial Trajectory (Scenario vs Baseline) -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <div class="chart-title-wrap">
+              <h3>24-Month Financial Trajectory</h3>
+              <p>Scenario vs Baseline Comparison (Monthly Revenue & Net Income)</p>
+            </div>
+            <div class="chart-legend">
+              <div class="legend-item"><span class="legend-dot" style="background: #38bdf8;"></span> Scenario Revenue</div>
+              <div class="legend-item"><span class="legend-dot" style="background: #10b981;"></span> Net Income</div>
+              <div class="legend-item"><span class="legend-dot" style="background: rgba(148, 163, 184, 0.6); border: 1px dashed #fff;"></span> Baseline Path</div>
+            </div>
+          </div>
+          <div style="height: 270px; width: 100%;">
+            <canvas id="chart-trajectory"></canvas>
+          </div>
+        </div>
+
+        <!-- Dual Chart Row: Cash Runway & Solvency Valuation -->
+        <div class="chart-split-grid">
+          <!-- Chart 2: Cash Runway & FCF Burn -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <div class="chart-title-wrap">
+                <h3>Cash Balance & FCF Runway</h3>
+                <p>Cash buffer (Area) & Monthly Free Cash Flow (Bars)</p>
+              </div>
+            </div>
+            <div style="height: 230px; width: 100%;">
+              <canvas id="chart-cash"></canvas>
+            </div>
+          </div>
+
+          <!-- Chart 3: Valuation Multiple & Altman Z -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <div class="chart-title-wrap">
+                <h3>Altman Z-Score & Market Cap</h3>
+                <p>Distress Thresholds (Safe: &gt;3.0, Grey: 1.8-3.0, Distress: &lt;1.8)</p>
+              </div>
+              <div class="chart-legend">
+                <div class="legend-item"><span class="legend-dot" style="background: #f59e0b;"></span> Altman Z</div>
+                <div class="legend-item"><span class="legend-dot" style="background: #ec4899;"></span> MCap ($B)</div>
+              </div>
+            </div>
+            <div style="height: 230px; width: 100%;">
+              <canvas id="chart-altman"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Month Scrubber & Detailed Month Inspector (Checkpoint 3) -->
+        <div class="scrubber-card">
+          <div class="scrubber-header">
+            <div>
+              <h3 style="font-size: 15px; font-weight: 700;">Month-by-Month Scrubber & Phase Inspector</h3>
+              <p style="font-size: 12px; color: var(--text-muted);">Scrub through Month 1 to Month 24 to inspect time-varying shock dynamics (COVID waves, 9/11 phases)</p>
+            </div>
+            <div style="font-family: var(--font-mono); font-size: 16px; font-weight: 700; color: var(--accent-cyan);" id="scrubber-val">
+              Month 1
+            </div>
+          </div>
+
+          <input type="range" id="month-scrubber" class="scrubber-slider" min="0" max="23" value="0" step="1">
+
+          <div class="inspector-narrative-bar">
+            <svg width="18" height="18" fill="var(--accent-cyan)" viewBox="0 0 16 16"><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/></svg>
+            <span id="insp-narrative">Stable baseline operations.</span>
+          </div>
+
+          <div class="inspector-metrics-grid">
+            <div class="insp-metric-tile">
+              <div class="insp-label">Monthly Revenue</div>
+              <div class="insp-val" id="insp-revenue">$0.0M</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Gross Margin: <strong id="insp-gross-margin" style="color: #fff;">0.0%</strong></div>
+            </div>
+
+            <div class="insp-metric-tile">
+              <div class="insp-label">Operating EBIT</div>
+              <div class="insp-val" id="insp-ebit">$0.0M</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Net Income: <strong id="insp-net-income" style="color: #fff;">$0.0M</strong></div>
+            </div>
+
+            <div class="insp-metric-tile">
+              <div class="insp-label">Cash Balance</div>
+              <div class="insp-val" id="insp-cash">$0.0M</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Monthly FCF: <strong id="insp-fcf" style="color: #fff;">$0.0M</strong></div>
+            </div>
+
+            <div class="insp-metric-tile">
+              <div class="insp-label">Altman Z-Score</div>
+              <div class="insp-val" id="insp-zscore" style="color: var(--accent-amber);">0.0</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Market Cap: <strong id="insp-mcap" style="color: #fff;">$0.0B</strong></div>
+            </div>
+
+            <!-- Radar chart embedded in inspector -->
+            <div style="height: 140px; width: 100%;">
+              <canvas id="chart-radar"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Permutation & Combination Comparison Matrix -->
+        <div class="matrix-card">
+          <h3 style="font-size: 16px; font-weight: 700; color: #fff;">Strategic Permutation & Combination Matrix</h3>
+          <p style="font-size: 12px; color: var(--text-muted);">Compares how selecting or deselecting different toggle combinations shifts top-line, profitability, and solvency.</p>
+
+          <table class="permutation-table">
+            <thead>
+              <tr>
+                <th>Scenario Permutation</th>
+                <th>24-Mo Revenue (Delta)</th>
+                <th>Net Income (Delta)</th>
+                <th>Terminal MCap</th>
+                <th>Lowest Altman Z</th>
+                <th>Cash Runway</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="permutation-tbody">
+              <!-- Dynamically populated by app.js -->
+            </tbody>
+          </table>
+        </div>
+
+      </section>
+    </main>
+
+  </div>
+
+  <!-- Schema Viewer Modal (16 Tables) -->
+  <div id="schema-modal" class="modal-overlay">
+    <div class="modal-content">
+      <button id="schema-modal-close" class="modal-close-btn">&times;</button>
+      <h2 style="font-size: 18px; font-weight: 800; color: #fff;">16-Table Corporate Data Dictionary & Schema</h2>
+      <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+        Standardized schema representing Company, Financials, Market, Benchmark, Macro, Calendar, Events, Decisions, Peer Decisions, Layoffs, Ratings, Guidance, News, Provenance, and Optional metrics.
+      </p>
+      <div id="schema-container"></div>
+    </div>
+  </div>
+
+  <!-- Model Calibration & Training Modal (Checkpoint 5) -->
+  <div id="calib-modal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 650px;">
+      <button id="calib-modal-close" class="modal-close-btn">&times;</button>
+      <h2 style="font-size: 18px; font-weight: 800; color: #fff;">Model Calibration & Training Suite (Checkpoint 5)</h2>
+      <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+        Calibrate elasticity weights ($\epsilon_{demand}, \epsilon_{supply}, \lambda_{decay}$) against actual SEC EDGAR quarterly filings across past crises.
+      </p>
+
+      <div style="margin: 20px 0; background: rgba(255,255,255,0.02); padding: 16px; border-radius: 8px;">
+        <div style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 6px;">Calibration Dataset:</div>
+        <div style="font-size: 12px; color: var(--text-secondary);">Ground truth: Apple Inc. 10-Q/10-K reported figures (Q1 2020 through Q4 2021) during COVID-19 pandemic wave.</div>
+        <button id="btn-run-calib" class="header-action-btn primary" style="margin-top: 14px;">Run Gradient-Free Optimization</button>
+      </div>
+
+      <div id="calib-results"></div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="charts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

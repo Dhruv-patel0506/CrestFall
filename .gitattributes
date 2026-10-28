@@ -1,0 +1,19 @@
+# Normalise line endings so a clone on macOS/Linux and this Windows working
+# copy produce identical builds.
+* text=auto eol=lf
+
+# Windows launchers must keep CRLF or cmd.exe mis-parses them
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never touch binary payloads
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.mp4 binary
+*.pptx binary
+*.pdf binary
+*.woff binary
+*.woff2 binary

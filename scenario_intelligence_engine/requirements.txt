@@ -1,0 +1,6 @@
+# Crestfall engine - runtime dependencies
+# The forecasting engine itself is pure Python standard library (csv, math,
+# statistics, threading). These three packages are all that is required.
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2

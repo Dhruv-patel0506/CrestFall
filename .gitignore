@@ -1,0 +1,46 @@
+# ---------------------------------------------------------------------------
+# Data that does not belong in git
+# ---------------------------------------------------------------------------
+# ~2 GB of source CSVs. Clone hosts get these out-of-band (see README), or the
+# demo runs against a hosted engine that already has them.
+scenario_intelligence_engine/new_data/
+
+# Per-company monthly aggregates + uploaded demo companies, rebuilt at runtime.
+scenario_intelligence_engine/data/uploads/
+
+# ---------------------------------------------------------------------------
+# Build output & dependencies (Vercel rebuilds the frontend from source)
+# ---------------------------------------------------------------------------
+node_modules/
+scenario_intelligence_engine/frontend/dist/
+scenario_intelligence_engine/frontend/.vite/
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ---------------------------------------------------------------------------
+# Local runs, scratch & OS noise
+# ---------------------------------------------------------------------------
+*.log
+.backup/
+scripts/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Screen-recording / verification artifacts that live at the workspace root
+# (the transition reference clip and browser screenshots are not project files)
+/*.png
+/*.jpg
+/*.mp4
+
+# Environment overrides (VITE_API_BASE etc.) - commit .env.example instead
+.env
+.env.local
+.env.*.local
