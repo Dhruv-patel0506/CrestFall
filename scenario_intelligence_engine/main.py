@@ -48,10 +48,16 @@ app.add_middleware(
 # -------------------------------------------------------------
 # COMPANY DATABASE INGESTION & REGISTRY
 # -------------------------------------------------------------
-DATA_DIR = os.path.join(CURRENT_DIR, "data")
-NEW_DATA_DIR = os.path.join(CURRENT_DIR, "new_data")
-if not os.path.exists(NEW_DATA_DIR):
-    NEW_DATA_DIR = r"C:\Users\hp\OneDrive\Desktop\new_data"
+DATA_DIR = os.getenv("CRESTFALL_DATA_DIR", os.path.join(CURRENT_DIR, "data"))
+NEW_DATA_DIR = os.getenv("CRESTFALL_NEW_DATA_DIR", os.path.join(CURRENT_DIR, "new_data"))
+# The old fallback pointed at one developer's OneDrive desktop, which silently
+# resolved to nothing on any other machine or container. The data directory is
+# now an explicit setting, and a missing dataset says so out loud instead of
+# pretending to be empty-by-design.
+if not os.path.isdir(NEW_DATA_DIR):
+    print(f"WARNING: no company data found at {NEW_DATA_DIR}")
+    print("         set CRESTFALL_NEW_DATA_DIR or copy the source CSVs there.")
+os.makedirs(DATA_DIR, exist_ok=True)
 
 COMPANIES_REGISTRY: Dict[str, Dict[str, Any]] = {}
 SCENARIO_CATALOG_CACHE: Optional[Dict[str, Any]] = None

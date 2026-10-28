@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# Caddyfile - public HTTPS in front of the engine
+# Replace the hostname, then:  caddy reload --config /etc/caddy/Caddyfile
+#
+# Caddy fetches and renews the TLS certificate automatically. Use port 80 only
+# for the redirect; visitors should always land on https.
+# ---------------------------------------------------------------------------
+
+crestfall.example.com {
+	encode zstd gzip
+
+	# The peer-comparison endpoint can legitimately run for 30-60 s.
+	# Do not let the proxy cut it off mid-flight.
+	reverse_proxy 127.0.0.1:8000 {
+		transport http {
+			read_timeout  300s
+			write_timeout 300s
+		}
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+
+	access_log {
+		output file /var/log/caddy/crestfall.access.log
+	}
+}
+
+# Plain HTTP: let Caddy redirect to HTTPS automatically.
+http://crestfall.example.com {
+	redir https://{host}{uri} permanent
+}

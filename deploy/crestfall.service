@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# Crestfall engine - systemd service
+# Copy to /etc/systemd/system/crestfall.service  (push-to-server.ps1 does this)
+#
+# Restart=always + WantedBy=multi-user.target means the app comes back after a
+# crash and boots with the machine - that is what keeps the link alive.
+# ---------------------------------------------------------------------------
+[Unit]
+Description=Crestfall forecasting engine (FastAPI + built React app)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=crestfall
+Group=crestfall
+WorkingDirectory=/opt/crestfall/scenario_intelligence_engine
+Environment=CRESTFALL_PORT=8000
+# Bound to localhost only: Caddy terminates TLS in front of it.
+ExecStart=/opt/crestfall/.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2 --proxy-headers
+Restart=always
+RestartSec=3
+# A forecast can run for tens of seconds; do not let systemd kill it mid-request.
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+# Modest hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/crestfall/scenario_intelligence_engine/data
+
+[Install]
+WantedBy=multi-user.target

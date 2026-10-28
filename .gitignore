@@ -8,6 +8,9 @@ scenario_intelligence_engine/new_data/
 # Per-company monthly aggregates + uploaded demo companies, rebuilt at runtime.
 scenario_intelligence_engine/data/uploads/
 
+# Leftovers from the abandoned static-site experiment (the app computes live).
+scenario_intelligence_engine/frontend/public/data/
+
 # ---------------------------------------------------------------------------
 # Build output & dependencies (Vercel rebuilds the frontend from source)
 # ---------------------------------------------------------------------------
