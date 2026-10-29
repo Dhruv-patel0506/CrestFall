@@ -1,0 +1,577 @@
+{
+  "description": "Universal sector strategies for companies without specific peer competitors. These strategies are derived from general industry patterns and can be used when peer-specific data is unavailable.",
+  "version": "1.0",
+  "last_updated": "2026-10-29",
+  "sectors": {
+    "teaching": {
+      "label": "Education & Teaching",
+      "description": "Educational institutions, schools, universities, training centers",
+      "common_strategies": [
+        {
+          "strategy_name": "curriculum_innovation",
+          "type": "product_launch",
+          "description": "Introduce new curriculum or teaching methods",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "medium",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["faculty training", "student adoption", "market demand"]
+        },
+        {
+          "strategy_name": "digital_transformation",
+          "type": "capex_change",
+          "description": "Invest in online learning platforms and digital infrastructure",
+          "typical_magnitude_range": [10, 30],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [12, 24],
+          "risk_level": "high",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["technical infrastructure", "content adaptation", "user experience"]
+        },
+        {
+          "strategy_name": "partnership_expansion",
+          "type": "acquisition",
+          "description": "Form partnerships with industry leaders or other institutions",
+          "typical_magnitude_range": [5, 20],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [9, 18],
+          "risk_level": "medium",
+          "implementation_timeframe": "6-9 months",
+          "key_success_factors": ["alignment of goals", "resource sharing", "reputation"]
+        },
+        {
+          "strategy_name": "faculty_optimization",
+          "type": "hiring",
+          "description": "Strategic hiring of specialized faculty or researchers",
+          "typical_magnitude_range": [3, 10],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [12, 24],
+          "risk_level": "low",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["talent pool", "compensation", "cultural fit"]
+        }
+      ],
+      "sector_trends": ["online learning", "skill-based education", "industry partnerships", "continuous learning"],
+      "competitive_factors": ["curriculum quality", "placement rates", "faculty expertise", "infrastructure"]
+    },
+    "industry": {
+      "label": "Industrial & Manufacturing",
+      "description": "Manufacturing, production, industrial operations",
+      "common_strategies": [
+        {
+          "strategy_name": "automation_investment",
+          "type": "capex_change",
+          "description": "Invest in automation and robotics to improve efficiency",
+          "typical_magnitude_range": [15, 40],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [12, 36],
+          "risk_level": "high",
+          "implementation_timeframe": "12-24 months",
+          "key_success_factors": ["technology selection", "integration", "workforce training"]
+        },
+        {
+          "strategy_name": "supply_chain_optimization",
+          "type": "cost_cut",
+          "description": "Optimize supply chain to reduce costs and improve reliability",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "medium",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["supplier relationships", "logistics", "inventory management"]
+        },
+        {
+          "strategy_name": "quality_certification",
+          "type": "product_launch",
+          "description": "Obtain quality certifications or standards compliance",
+          "typical_magnitude_range": [2, 8],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 18],
+          "risk_level": "low",
+          "implementation_timeframe": "3-12 months",
+          "key_success_factors": ["documentation", "process control", "auditing"]
+        },
+        {
+          "strategy_name": "capacity_expansion",
+          "type": "capex_change",
+          "description": "Expand production capacity to meet growing demand",
+          "typical_magnitude_range": [10, 50],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [12, 24],
+          "risk_level": "high",
+          "implementation_timeframe": "12-24 months",
+          "key_success_factors": ["market demand", "capital availability", "operational scaling"]
+        }
+      ],
+      "sector_trends": ["Industry 4.0", "sustainable manufacturing", "reshoring", "smart factories"],
+      "competitive_factors": ["production efficiency", "quality", "cost structure", "delivery speed"]
+    },
+    "corporate": {
+      "label": "Corporate Services",
+      "description": "Professional services, consulting, B2B services",
+      "common_strategies": [
+        {
+          "strategy_name": "service_expansion",
+          "type": "product_launch",
+          "description": "Expand service offerings or enter new markets",
+          "typical_magnitude_range": [5, 20],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 18],
+          "risk_level": "medium",
+          "implementation_timeframe": "3-12 months",
+          "key_success_factors": ["market research", "talent acquisition", "client relationships"]
+        },
+        {
+          "strategy_name": "digital_service_enablement",
+          "type": "capex_change",
+          "description": "Invest in digital tools and platforms for service delivery",
+          "typical_magnitude_range": [10, 25],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "medium",
+          "implementation_timeframe": "3-9 months",
+          "key_success_factors": ["technology stack", "user adoption", "process reengineering"]
+        },
+        {
+          "strategy_name": "strategic_partnerships",
+          "type": "acquisition",
+          "description": "Form strategic partnerships or joint ventures",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [9, 18],
+          "risk_level": "medium",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["partner selection", "agreement structure", "integration"]
+        },
+        {
+          "strategy_name": "talent_development",
+          "type": "hiring",
+          "description": "Invest in talent development and specialized hiring",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "low",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["recruitment", "training", "retention"]
+        }
+      ],
+      "sector_trends": ["digital transformation", "remote services", "specialized consulting", "AI integration"],
+      "competitive_factors": ["service quality", "client relationships", "expertise", "innovation"]
+    },
+    "arts": {
+      "label": "Arts & Entertainment",
+      "description": "Arts organizations, entertainment venues, creative industries",
+      "common_strategies": [
+        {
+          "strategy_name": "digital_presence",
+          "type": "product_launch",
+          "description": "Expand digital presence through streaming, virtual events, or online content",
+          "typical_magnitude_range": [10, 30],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [3, 9],
+          "risk_level": "medium",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["content quality", "platform selection", "audience engagement"]
+        },
+        {
+          "strategy_name": "diversification",
+          "type": "product_launch",
+          "description": "Diversify revenue streams through merchandise, licensing, or new formats",
+          "typical_magnitude_range": [5, 20],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "medium",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["brand strength", "market fit", "execution"]
+        },
+        {
+          "strategy_name": "venue_upgrade",
+          "type": "capex_change",
+          "description": "Upgrade facilities or technology to enhance audience experience",
+          "typical_magnitude_range": [10, 25],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [12, 24],
+          "risk_level": "high",
+          "implementation_timeframe": "6-18 months",
+          "key_success_factors": ["capital", "timing", "audience acceptance"]
+        },
+        {
+          "strategy_name": "collaborative_programs",
+          "type": "acquisition",
+          "description": "Collaborate with other artists or organizations for joint productions",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "low",
+          "implementation_timeframe": "3-9 months",
+          "key_success_factors": ["creative alignment", "shared vision", "resource planning"]
+        }
+      ],
+      "sector_trends": ["digital distribution", "hybrid events", "community engagement", "content monetization"],
+      "competitive_factors": ["creativity", "audience engagement", "brand reputation", "production quality"]
+    },
+    "racing": {
+      "label": "Racing & Motorsports",
+      "description": "Racing teams, motorsports organizations, automotive racing",
+      "common_strategies": [
+        {
+          "strategy_name": "technology_upgrade",
+          "type": "capex_change",
+          "description": "Invest in advanced vehicle technology and engineering",
+          "typical_magnitude_range": [15, 35],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 18],
+          "risk_level": "high",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["R&D capability", "regulatory compliance", "driver adaptation"]
+        },
+        {
+          "strategy_name": "talent_acquisition",
+          "type": "hiring",
+          "description": "Acquire top drivers, engineers, or technical staff",
+          "typical_magnitude_range": [10, 25],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "high",
+          "implementation_timeframe": "3-9 months",
+          "key_success_factors": ["talent pool", "compensation", "team integration"]
+        },
+        {
+          "strategy_name": "sponsorship_expansion",
+          "type": "acquisition",
+          "description": "Expand sponsorship portfolio and partnerships",
+          "typical_magnitude_range": [10, 30],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [3, 9],
+          "risk_level": "medium",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["brand alignment", "market reach", "value proposition"]
+        },
+        {
+          "strategy_name": "data_analytics",
+          "type": "capex_change",
+          "description": "Invest in data analytics and performance monitoring systems",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "medium",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["data infrastructure", "analytical capability", "actionable insights"]
+        }
+      ],
+      "sector_trends": ["electric racing", "data-driven performance", "sustainability", "global expansion"],
+      "competitive_factors": ["performance", "innovation", "team chemistry", "financial backing"]
+    },
+    "healthcare": {
+      "label": "Healthcare & Medical",
+      "description": "Hospitals, clinics, healthcare providers, medical services",
+      "common_strategies": [
+        {
+          "strategy_name": "technology_adoption",
+          "type": "capex_change",
+          "description": "Adopt medical technology and diagnostic equipment",
+          "typical_magnitude_range": [10, 30],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 18],
+          "risk_level": "high",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["regulatory approval", "staff training", "patient acceptance"]
+        },
+        {
+          "strategy_name": "specialization",
+          "type": "product_launch",
+          "description": "Develop specialized treatment centers or programs",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [9, 18],
+          "risk_level": "medium",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["expertise", "market demand", "infrastructure"]
+        },
+        {
+          "strategy_name": "telemedicine_expansion",
+          "type": "product_launch",
+          "description": "Expand telemedicine and remote care capabilities",
+          "typical_magnitude_range": [10, 25],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [3, 9],
+          "risk_level": "medium",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["technology platform", "regulatory compliance", "patient adoption"]
+        },
+        {
+          "strategy_name": "staff_optimization",
+          "type": "hiring",
+          "description": "Strategic hiring of specialized medical professionals",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "low",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["talent availability", "compensation", "work culture"]
+        }
+      ],
+      "sector_trends": ["telemedicine", "personalized medicine", "AI diagnostics", "preventive care"],
+      "competitive_factors": ["quality of care", "patient outcomes", "accessibility", "cost efficiency"]
+    },
+    "retail": {
+      "label": "Retail & E-commerce",
+      "description": "Retail stores, e-commerce, consumer goods",
+      "common_strategies": [
+        {
+          "strategy_name": "omnichannel_expansion",
+          "type": "product_launch",
+          "description": "Integrate online and offline sales channels",
+          "typical_magnitude_range": [10, 25],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "medium",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["technology integration", "inventory management", "customer experience"]
+        },
+        {
+          "strategy_name": "personalization",
+          "type": "capex_change",
+          "description": "Invest in personalization technology and customer data analytics",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "medium",
+          "implementation_timeframe": "3-9 months",
+          "key_success_factors": ["data quality", "technology", "customer acceptance"]
+        },
+        {
+          "strategy_name": "supply_chain_optimization",
+          "type": "cost_cut",
+          "description": "Optimize supply chain and inventory management",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [3, 9],
+          "risk_level": "low",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["supplier relationships", "technology", "forecasting"]
+        },
+        {
+          "strategy_name": "customer_loyalty",
+          "type": "product_launch",
+          "description": "Implement or enhance customer loyalty programs",
+          "typical_magnitude_range": [3, 10],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "low",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["program design", "rewards structure", "communication"]
+        }
+      ],
+      "sector_trends": ["omnichannel retail", "sustainability", "direct-to-consumer", "AI-powered recommendations"],
+      "competitive_factors": ["price", "selection", "convenience", "customer experience"]
+    },
+    "technology": {
+      "label": "Technology & Software",
+      "description": "Software companies, tech startups, IT services",
+      "common_strategies": [
+        {
+          "strategy_name": "product_innovation",
+          "type": "product_launch",
+          "description": "Launch new products or features",
+          "typical_magnitude_range": [10, 30],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [3, 9],
+          "risk_level": "high",
+          "implementation_timeframe": "3-9 months",
+          "key_success_factors": ["R&D", "market fit", "user adoption"]
+        },
+        {
+          "strategy_name": "talent_acquisition",
+          "type": "hiring",
+          "description": "Hire specialized technical talent",
+          "typical_magnitude_range": [10, 25],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "medium",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["talent pool", "compensation", "culture"]
+        },
+        {
+          "strategy_name": "strategic_partnerships",
+          "type": "acquisition",
+          "description": "Form partnerships or acquire complementary technologies",
+          "typical_magnitude_range": [15, 40],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 18],
+          "risk_level": "high",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["due diligence", "integration", "cultural fit"]
+        },
+        {
+          "strategy_name": "infrastructure_scaling",
+          "type": "capex_change",
+          "description": "Scale infrastructure to support growth",
+          "typical_magnitude_range": [10, 30],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [3, 6],
+          "risk_level": "medium",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["architecture", "automation", "monitoring"]
+        }
+      ],
+      "sector_trends": ["AI/ML", "cloud computing", "cybersecurity", "developer tools"],
+      "competitive_factors": ["innovation", "time-to-market", "user experience", "scalability"]
+    },
+    "finance": {
+      "label": "Financial Services",
+      "description": "Banks, insurance, investment firms, financial services",
+      "common_strategies": [
+        {
+          "strategy_name": "digital_banking",
+          "type": "product_launch",
+          "description": "Enhance digital banking and mobile capabilities",
+          "typical_magnitude_range": [10, 25],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "medium",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["technology", "security", "user experience"]
+        },
+        {
+          "strategy_name": "risk_management",
+          "type": "capex_change",
+          "description": "Invest in advanced risk management and compliance systems",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [12, 24],
+          "risk_level": "low",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["regulatory knowledge", "technology", "process"]
+        },
+        {
+          "strategy_name": "product_diversification",
+          "type": "product_launch",
+          "description": "Diversify financial product offerings",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 18],
+          "risk_level": "medium",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["market research", "regulatory approval", "distribution"]
+        },
+        {
+          "strategy_name": "customer_experience",
+          "type": "capex_change",
+          "description": "Invest in customer experience improvements",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "low",
+          "implementation_timeframe": "3-9 months",
+          "key_success_factors": ["understanding", "technology", "training"]
+        }
+      ],
+      "sector_trends": ["digital transformation", "fintech", "personalization", "sustainable finance"],
+      "competitive_factors": ["trust", "rates/fees", "service quality", "convenience"]
+    },
+    "general": {
+      "label": "General/Other",
+      "description": "Default strategies for uncategorized sectors",
+      "common_strategies": [
+        {
+          "strategy_name": "operational_efficiency",
+          "type": "cost_cut",
+          "description": "Improve operational efficiency and reduce costs",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [3, 9],
+          "risk_level": "low",
+          "implementation_timeframe": "3-6 months",
+          "key_success_factors": ["process analysis", "implementation", "change management"]
+        },
+        {
+          "strategy_name": "market_expansion",
+          "type": "product_launch",
+          "description": "Expand into new markets or customer segments",
+          "typical_magnitude_range": [5, 20],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 18],
+          "risk_level": "medium",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["market research", "localization", "distribution"]
+        },
+        {
+          "strategy_name": "strategic_investment",
+          "type": "capex_change",
+          "description": "Strategic investment in core capabilities",
+          "typical_magnitude_range": [10, 25],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 18],
+          "risk_level": "medium",
+          "implementation_timeframe": "6-12 months",
+          "key_success_factors": ["priority", "capital allocation", "execution"]
+        },
+        {
+          "strategy_name": "partnership_collaboration",
+          "type": "acquisition",
+          "description": "Form strategic partnerships or collaborations",
+          "typical_magnitude_range": [5, 15],
+          "magnitude_unit": "percent",
+          "expected_revenue_impact_months": [6, 12],
+          "risk_level": "low",
+          "implementation_timeframe": "3-9 months",
+          "key_success_factors": ["partner selection", "agreement", "execution"]
+        }
+      ],
+      "sector_trends": ["digitalization", "sustainability", "customer-centricity", "innovation"],
+      "competitive_factors": ["quality", "price", "service", "innovation"]
+    }
+  },
+  "strategy_type_mapping": {
+    "hiring": {
+      "impact_type": "opex_increase",
+      "typical_impact_range": [0.05, 0.15],
+      "revenue_multiplier_range": [1.02, 1.10],
+      "description": "Hiring typically increases operating expenses but can boost revenue through improved capacity or expertise"
+    },
+    "layoffs": {
+      "impact_type": "opex_decrease",
+      "typical_impact_range": [-0.12, -0.08],
+      "revenue_multiplier_range": [0.97, 0.99],
+      "description": "Layoffs reduce operating expenses but may slightly reduce revenue due to organizational friction"
+    },
+    "capex_change": {
+      "impact_type": "investment",
+      "typical_impact_range": [0.10, 0.30],
+      "revenue_multiplier_range": [1.05, 1.15],
+      "description": "Capital expenditures represent upfront investment with delayed revenue impact"
+    },
+    "acquisition": {
+      "impact_type": "combination",
+      "typical_impact_range": [0.05, 0.20],
+      "revenue_multiplier_range": [1.08, 1.18],
+      "description": "Acquisitions combine both investment and operational changes with complex integration"
+    },
+    "product_launch": {
+      "impact_type": "revenue_boost",
+      "typical_impact_range": [0.05, 0.15],
+      "revenue_multiplier_range": [1.05, 1.12],
+      "description": "Product launches typically increase revenue with moderate upfront costs"
+    },
+    "price_change": {
+      "impact_type": "pricing",
+      "typical_impact_range": [0.05, 0.10],
+      "revenue_multiplier_range": [1.03, 1.08],
+      "description": "Price changes directly affect revenue with volume trade-offs"
+    },
+    "cost_cut": {
+      "impact_type": "efficiency",
+      "typical_impact_range": [-0.10, -0.05],
+      "revenue_multiplier_range": [0.98, 1.02],
+      "description": "Cost cutting improves margins with minimal revenue impact"
+    },
+    "buyback": {
+      "impact_type": "capital_return",
+      "typical_impact_range": [0.02, 0.05],
+      "revenue_multiplier_range": [1.00, 1.02],
+      "description": "Share buybacks return capital to shareholders with minimal operational impact"
+    }
+  }
+}
