@@ -28,3 +28,7 @@ frontend/.vercel
 *.mp4
 *.csv
 !requirements.txt
+# 2 GB of source CSVs and uploads are bind-mounted at runtime, never baked into the image
+new_data
+uploads
+*.bak*

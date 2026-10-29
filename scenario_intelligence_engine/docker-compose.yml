@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   crestfall:
     build: .
@@ -15,7 +13,9 @@ services:
       - PORT=8000
       - CRESTFALL_RELOAD=0
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      # python:3.13-slim has no curl, so the old curl check always reported "unhealthy"
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=8)"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 120s
