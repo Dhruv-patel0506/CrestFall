@@ -729,6 +729,7 @@ COMPANY_CSV_FIELDS: Dict[str, set] = {}
 _MONTHLY_CACHE_LOCKS: Dict[str, threading.Lock] = {}
 _MONTHLY_CACHE_LOCKS_GUARD = threading.Lock()
 DAILY_SERIES_CACHE: Dict[tuple, List[Dict[str, Any]]] = {}
+DAILY_SERIES_TOTALS: Dict[str, int] = {}
 _DAILY_SERIES_CACHE_LOCK = threading.RLock()
 _RAW_CSV_CACHE: Dict[str, List[Dict[str, str]]] = {}
 _RAW_CSV_CACHE_LOCK = threading.RLock()
@@ -785,6 +786,19 @@ def _load_raw_csv_data(csv_path: str) -> List[Dict[str, str]]:
             _RAW_CSV_CACHE.pop(next(iter(_RAW_CSV_CACHE)))
         
         return raw_rows
+
+def _csv_header(csv_path: str) -> List[str]:
+    """First row of a CSV, so a loader can learn the columns without reading the file."""
+    if not csv_path or not os.path.isfile(csv_path):
+        return []
+    with open(csv_path, "r", encoding="utf-8", errors="ignore", newline="") as source:
+        return next(csv.reader(source), [])
+
+def _stream_csv_rows(csv_path: str):
+    """Yield CSV rows one at a time. _load_raw_csv_data keeps every row as a dict,
+    which is several hundred MB for a single 45 MB source file."""
+    with open(csv_path, "r", encoding="utf-8", errors="ignore", newline="") as source:
+        yield from csv.DictReader(source)
 
 def _clean_upload_date(value: Any) -> str:
     text = str(value or "").strip()
@@ -918,13 +932,13 @@ def _load_company_monthly_data_locked(file_path: str) -> List[Dict[str, Any]]:
     if not file_path or not os.path.exists(file_path):
         return []
     
-    # Use cached raw CSV data if available for faster loading
-    raw_rows = _load_raw_csv_data(file_path)
-    if not raw_rows:
+    # Stream the file: only the monthly summary below is kept, not every row.
+    csv_header = _csv_header(file_path)
+    if not csv_header:
         return []
-    
-    COMPANY_CSV_FIELDS[file_path] = set(raw_rows[0].keys()) if raw_rows else set()
-    for row in raw_rows:
+
+    COMPANY_CSV_FIELDS[file_path] = set(csv_header)
+    for row in _stream_csv_rows(file_path):
         d = row.get("date", "")
         if not d:
             continue
@@ -1055,6 +1069,21 @@ def _load_company_monthly_data_locked(file_path: str) -> List[Dict[str, Any]]:
         previous_rate = rate
     COMPANIES_MONTHLY_CACHE[file_path] = pts
     return pts
+
+def _warm_monthly_cache() -> None:
+    """Read every source file once in the background after startup, so the peer
+    comparison on a visitor's first click is not the request that pays for 49 CSVs."""
+    for entry in list(COMPANIES_REGISTRY.values()):
+        path = entry.get("csv_path")
+        if path:
+            try:
+                load_company_monthly_data(path)
+            except Exception as exc:
+                print(f"warm-up skipped {entry.get('company_id')}: {exc}")
+    print("Monthly cache warm for all source files.")
+
+if os.environ.get("CRESTFALL_WARM", "1") == "1":
+    threading.Thread(target=_warm_monthly_cache, name="monthly-warm", daemon=True).start()
 
 @app.get("/api/company/{company_id}/history")
 def get_company_history(
@@ -1510,15 +1539,17 @@ def get_company_history_series(
     with _DAILY_SERIES_CACHE_LOCK:
         cached_data = DAILY_SERIES_CACHE.get(cache_key)
         if cached_data is None:
-            # Load raw CSV once from cache
-            raw_rows = _load_raw_csv_data(csv_path)
-            if not raw_rows:
+            # Stream the file once; the pruning below keeps memory flat on 45 MB sources
+            csv_header = _csv_header(csv_path)
+            if not csv_header:
                 cached_data = []
             else:
                 # Extract all common metrics at once to enable fast switching
-                fields = set(raw_rows[0].keys()) if raw_rows else set()
-                observations = []
-                for row in raw_rows:
+                fields = set(csv_header)
+                seen_stamps = set()
+                day_last = {}      # session date -> its latest observation
+                recent_days = {}   # session date -> {timestamp: observation}, newest sessions only
+                for row in _stream_csv_rows(csv_path):
                     raw_date = row.get("timestamp") or row.get("datetime") or row.get("date") or ""
                     cleaned_date = _clean_upload_date(raw_date)
                     if not cleaned_date:
@@ -1557,19 +1588,39 @@ def get_company_history_series(
                             if val is not None:
                                 metric_values[field] = val
                     
-                    observations.append({
+                    point = {
                         "date": date_string,
                         "date_label": parsed_date.strftime("%b %d · %H:%M") if has_time else parsed_date.strftime("%b %d, %Y"),
                         "value": close,
                         "metric_values": metric_values,
-                    })
-                
-                by_timestamp = {point["date"]: point for point in observations}
-                observations = [by_timestamp[key] for key in sorted(by_timestamp)]
+                    }
+                    # Every range below 1M reads only the last point of each session,
+                    # and the intraday ranges (1D-4W) read at most the 20 newest
+                    # sessions. Keeping just those holds the same answers in a
+                    # fraction of the memory of one object per source row.
+                    seen_stamps.add(date_string)
+                    session = date_string[:10]
+                    previous = day_last.get(session)
+                    if previous is None or date_string >= previous["date"]:
+                        day_last[session] = point
+                    bucket = recent_days.get(session)
+                    if bucket is None:
+                        if len(recent_days) >= 20 and session < min(recent_days):
+                            continue
+                        bucket = recent_days[session] = {}
+                        if len(recent_days) > 20:
+                            del recent_days[min(recent_days)]
+                    bucket[date_string] = point
+
+                kept = {point["date"]: point for point in day_last.values()}
+                for bucket in recent_days.values():
+                    kept.update(bucket)
+                observations = [kept[key] for key in sorted(kept)]
                 cached_data = observations
                 DAILY_SERIES_CACHE[cache_key] = cached_data
+                DAILY_SERIES_TOTALS[cache_key] = len(seen_stamps)
                 # Cap cache to prevent memory bloat
-                while len(DAILY_SERIES_CACHE) > 50:
+                while len(DAILY_SERIES_CACHE) > 12:
                     DAILY_SERIES_CACHE.pop(next(iter(DAILY_SERIES_CACHE)))
         
         observations = cached_data
@@ -1629,7 +1680,7 @@ def get_company_history_series(
             })
     
     return {"company_id": company["company_id"], "metric": metric, "range": time_range,
-            "frequency": frequency, "observations_available": len(observations), "history": filtered_result}
+            "frequency": frequency, "observations_available": DAILY_SERIES_TOTALS.get(cache_key, len(observations)), "history": filtered_result}
 
 @app.get("/api/scenario-catalog/{company_id}")
 def get_scenario_catalog(company_id: str):
