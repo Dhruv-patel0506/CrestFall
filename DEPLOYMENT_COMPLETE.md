@@ -2,7 +2,8 @@
 
 ## 🌐 Live URLs
 - **Frontend:** https://crestfall-phi.vercel.app
-- **Backend:** http://54.79.67.55:8000
+- **Backend:** http://54.79.67.55:8000 (AWS EC2)
+- **Backend (HTTPS Tunnel):** https://directive-looksmart-graph-exploration.trycloudflare.com
 
 ## 📊 What's Hosted
 - ✅ **Backend:** AWS EC2 t3.micro (Free Tier - 12 months)
@@ -22,7 +23,7 @@
 1. Access the app anytime at https://crestfall-phi.vercel.app
 2. Upload datasets up to 1GB
 3. Close your computer - app stays online!
-4. No Cloudflare Tunnel needed
+4. **IMPORTANT:** Keep Cloudflare Tunnel running (cloudflared.exe) for HTTPS connection
 
 ## ⚠️ Important Notes
 - AWS Free Tier expires in 12 months
@@ -36,6 +37,17 @@ If you want to stop to save money:
 2. Select your instance (i-0b4409c13f18889c5)
 3. Click "Instance state" → "Stop instance"
 4. To start again: "Instance state" → "Start instance"
+
+## ⚠️ IMPORTANT: Cloudflare Tunnel Required
+The frontend needs HTTPS to connect to the backend. Since AWS EC2 Free Tier doesn't include a free SSL certificate, we use Cloudflare Tunnel for HTTPS.
+
+**To start the tunnel (required for app to work):**
+```powershell
+cd D:/Rocast
+.\cloudflared.exe tunnel --url http://54.79.67.55:8000
+```
+
+Keep this terminal window open while using the app. The tunnel URL changes each time you restart it, so you'll need to update the frontend `.env.production` with the new URL if you restart.
 
 ## 🔄 How to Update Code
 Just push to GitHub:
