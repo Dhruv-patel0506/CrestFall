@@ -1,11 +1,14 @@
 # Crestfall Hosting Setup Guide
 
 ## Current Status
-✅ **Backend** - Running locally on port 8000 with Cloudflare Tunnel
-✅ **Cloudflare Tunnel** - Public URL: https://further-removable-language-remember.trycloudflare.com
-✅ **Frontend** - Deployed to Vercel (Project: front-end-crest-form)
-✅ **Vercel** - Live at: https://frontend-red-eta-80.vercel.app
-✅ **Dataset Import Limit** - Increased from 50MB to 150MB
+✅ **Backend** - Hosted on AWS EC2 Free Tier (t3.micro)
+✅ **Backend URL** - http://54.79.67.55:8000
+✅ **Frontend** - Deployed to Vercel (Project: crestfall)
+✅ **Vercel URL** - https://crestfall-phi.vercel.app
+✅ **Dataset Import Limit** - Increased to 1GB
+✅ **Git Connected** - Automatic deployments on push
+✅ **Free Tier** - AWS EC2 t3.micro (12 months free)
+✅ **Companies Loaded** - 46 companies
 
 ## Architecture
 - **Frontend** (React) → Deployed to Vercel (free)
@@ -105,6 +108,6 @@ Once Vercel is deployed:
 
 ## URLs
 
-- Local backend: http://localhost:8000
-- Tunnel backend: https://further-removable-language-remember.trycloudflare.com
-- Vercel frontend: https://frontend-red-eta-80.vercel.app
+- Local backend: http://localhost:8000 (not needed)
+- AWS backend: http://54.79.67.55:8000
+- Vercel frontend: https://crestfall-phi.vercel.app
