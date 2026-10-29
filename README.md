@@ -135,7 +135,8 @@ holding every row in memory (loading them whole used ~700 MB per file and got th
 After any restart the first peer comparison can take up to ~100 s while the monthly cache warms in
 the background (~8 min); afterwards it answers in seconds.
 
-Other hosting options (VPS, laptop + tunnel) are written up in `deploy/README.md`.
+Other hosting options (VPS, laptop + tunnel) are written up in `deploy/README.md`; the earlier
+provider comparisons (App Runner, Lightsail, Render, free tier) are kept in `deploy/hosting-notes/`.
 
 ## Tests
 
