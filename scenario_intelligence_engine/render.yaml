@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: crestfall-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: PORT
+        value: 8000
+    disk:
+      name: data
+      mountPath: /app/new_data
+      sizeGB: 3
