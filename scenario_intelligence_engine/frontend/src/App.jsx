@@ -3,7 +3,8 @@ import {
   Building2, TrendingUp, AlertTriangle, ShieldCheck, BarChart3,
   Users, ArrowUpRight, ArrowDownRight, RefreshCw,
   HelpCircle, Sparkles, CheckCircle2, Upload, X,
-  Activity, Gauge, Sun, Moon, CalendarDays, Flame, Database, ZoomIn, ZoomOut, Maximize2
+  Activity, Gauge, Sun, Moon, CalendarDays, Flame, Database, ZoomIn, ZoomOut, Maximize2,
+  Info, ShieldAlert, Layers
 } from 'lucide-react';
 import ScenarioLab from './components/ScenarioLab';
 import WelcomeGate from './components/WelcomeGate';
@@ -212,36 +213,43 @@ function Dashboard({ launch, onProgress, onChangeCompany, seededCompanies }) {
     setRateShockBps(0);
     setScenarioPrimitives({});
     setScenarioCatalog(null);
-    setScenarioCatalogRequested(false);
+    // Deliberately NOT resetting scenarioCatalogRequested here. The catalog is
+    // part of the warm-up now, and this effect re-runs a second time when
+    // companyDefaultMetrics lands - resetting the flag here meant the retry
+    // never fired, so switching company left the catalog null, which in turn
+    // blocked decision evidence and the recommended-steps list permanently.
     setUserCalendarInputs([]);
     setCalendarEventName('');
     setForecastStartMonth('');
     setForecastEndMonth('');
+    // Only the company id belongs in these deps. companyDefaultMetrics arrives
+    // later, and re-running the whole reset for it wiped the freshly cleared
+    // request ids underneath effects that do not re-run - which is how switching
+    // company could leave the scenario catalog and decision evidence dead.
+  }, [selectedCompanyId]);
+
+  // Default metric per company, kept in its own effect so it can never re-trigger
+  // the reset above.
+  useEffect(() => {
+    if (!selectedCompanyId) return;
     setHistoryMetric(companyDefaultMetrics[selectedCompanyId] || launch.defaultMetric || 'close');
   }, [selectedCompanyId, companyDefaultMetrics]);
 
   // Nothing below waits for a tab any more: every workspace is fetched during
   // the intro transition, so switching tabs never shows a spinner.
-  useEffect(() => {
-    if (!selectedCompanyId || !scenarioCatalogRequested) return;
-    const requestId = ++scenarioRequestId.current;
-    fetch(`${API_BASE}/scenario-catalog/${selectedCompanyId}`)
-      .then(response => response.json())
-      .then(data => { if (requestId === scenarioRequestId.current) setScenarioCatalog(data); })
-      .catch(error => console.error('Error loading dataset scenario catalog:', error));
-  }, [selectedCompanyId, scenarioCatalogRequested]);
+  // Scenario catalog is now loaded in parallel with profile/history above
 
   useEffect(() => {
     // Wave 3: decision evidence waits for the forecast so it does not fight the
     // critical path for the single-threaded engine.
-    if (!scenarioCatalog || !selectedCompanyId || !forecastData || forecastData.company_id !== selectedCompanyId || forecastLoading) return;
+    if (!selectedCompanyId || !forecastData || forecastData.company_id !== selectedCompanyId || forecastLoading) return;
     const requestId = ++recommendationRequestId.current;
     fetch(`${API_BASE}/company/${selectedCompanyId}/recommendations`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ span: selectedSpan, toggles, rate_shock_bps: Number(rateShockBps) })
     }).then(response => response.json()).then(data => { if (requestId === recommendationRequestId.current && data.company_id === selectedCompanyId) setRecommendationsData(data); })
       .catch(error => console.error('Error updating peer decision evidence:', error));
-  }, [scenarioCatalog, selectedCompanyId, selectedSpan, toggles, rateShockBps, forecastData, forecastLoading]);
+  }, [selectedCompanyId, selectedSpan, toggles, rateShockBps, forecastData, forecastLoading]);
 
   // Fetch company-specific data when selectedCompanyId or selectedSpan changes
   useEffect(() => {
@@ -251,11 +259,13 @@ function Dashboard({ launch, onProgress, onChangeCompany, seededCompanies }) {
 
     Promise.all([
       fetch(`${API_BASE}/company/${selectedCompanyId}/profile?span=${selectedSpan}`).then(r => r.json()),
-      fetch(`${API_BASE}/company/${selectedCompanyId}/history?view=${historyView}&quick_filter=ALL`).then(r => r.json())
-    ]).then(([prof, hist]) => {
+      fetch(`${API_BASE}/company/${selectedCompanyId}/history?view=${historyView}&quick_filter=ALL`).then(r => r.json()),
+      fetch(`${API_BASE}/scenario-catalog/${selectedCompanyId}`).then(r => r.json())
+    ]).then(([prof, hist, catalog]) => {
       if (requestId !== dashboardRequestId.current) return;
       setProfile(prof);
       setHistoryData(hist);
+      setScenarioCatalog(catalog);
       const latestMonth = hist.history?.at(-1)?.date;
       if (latestMonth && forecastRangeCompanyId.current !== selectedCompanyId) {
         const [year, month] = latestMonth.split('-').map(Number);
@@ -352,6 +362,16 @@ function Dashboard({ launch, onProgress, onChangeCompany, seededCompanies }) {
   const uploadCompanyDataset = async () => {
     if (!uploadFile) {
       setUploadMessage('Choose a CSV file to start the analysis.');
+      return;
+    }
+    // CSV only. The engine reads delimited text, so a workbook or JSON export
+    // would fail with a confusing parser error rather than a clear refusal.
+    if (/\.(xlsx|xls|parquet|json|txt|tsv|zip|numbers|ods)$/i.test(uploadFile.name)) {
+      setUploadMessage(`${uploadFile.name.split('.').pop().toUpperCase()} is not supported. Crestfall takes .csv files only - export this one as CSV first.`);
+      return;
+    }
+    if (!/\.csv$/i.test(uploadFile.name)) {
+      setUploadMessage('Crestfall takes .csv files only. Add a plain CSV export of the dataset.');
       return;
     }
     if (uploadFile.size > 50 * 1024 * 1024) {
@@ -530,6 +550,135 @@ function Dashboard({ launch, onProgress, onChangeCompany, seededCompanies }) {
   const currentCompanyName = profile?.identity?.company_name || selectedCompanyId;
   const currentTicker = profile?.identity?.ticker || selectedCompanyId;
 
+  // -------------------------------------------------- recommended next steps
+  // A short, plain-English action list for the bottom of the decisions page.
+  // Every line is read out of data that is already on screen: the modelled
+  // path, the timing bars, and the dated decision evidence (this company's own
+  // moves plus peer moves from the supplied files). When the file does not
+  // carry enough dated decisions, the card says so instead of inventing advice.
+  const nextSteps = useMemo(() => {
+    const steps = [];
+    const series = forecastData?.forecast_series || [];
+    const inRange = series.filter(point => point.in_requested_range);
+    const end = inRange.at(-1) || series.at(-1);
+    const latest = (forecastData?.recent_history || []).at(-1);
+    const startValue = Number(latest?.value ?? latest?.close);
+    const change = end && startValue ? (Number(end.forecast_value) / startValue - 1) * 100 : null;
+    const months = (inRange.length || series.length) || 12;
+    const crashBar = (timingData?.crash_timing?.bars || []).find(bar => bar.is_most_likely);
+    const peakBar = (timingData?.peak_timing?.bars || []).find(bar => bar.is_most_likely);
+    const recs = recommendationsData?.recommendations || [];
+    // The backend appends peer-derived entries into the same list, tagged
+    // "Peer action: ...". They must never be described as this company's own file.
+    const isPeerEntry = value => /^Peer action:\s*/i.test(String(value || ''));
+    const ownLabel = value => String(value || '').replace(/^Peer action:\s*/i, '');
+    const ownRecs = recs.filter(item => !isPeerEntry(item.decision));
+    const peerRecs = recs.filter(item => isPeerEntry(item.decision));
+    const best = ownRecs[0];
+    const bestPeer = peerRecs[0] || null;
+    const worst = ownRecs.length > 1 ? ownRecs[ownRecs.length - 1] : null;
+    const usedPeerLabel = !best && bestPeer ? ownLabel(bestPeer.decision).toLowerCase() : null;
+    const downside = end && startValue && end.band_low != null
+      ? (Number(end.band_low) / startValue - 1) * 100 : null;
+    // One peer read is enough: if the evidence list already supplied a peer
+    // action (the branch used for files with no own dated decisions), do not
+    // append a second catalog-derived peer line saying almost the same thing.
+    const peerMove = (!best && bestPeer) ? null : (scenarioCatalog?.peer_decisions || [])
+      .filter(item => item.estimated_effect_pct != null && (item.observations || 0) >= 3
+        && String(item.label || '').toLowerCase() !== usedPeerLabel)
+      .sort((a, b) => Math.abs(b.estimated_effect_pct) - Math.abs(a.estimated_effect_pct))[0] || null;
+
+    // Own decision evidence is grouped by decision type ("Infrastructure Build"),
+    // while the forecast umbrellas toggle the full label ("Infrastructure Build:
+    // capacity expansion ..."). Bridge the two so the top own move is testable.
+    const ownToggleKey = best
+      ? ((scenarioCatalog?.company_decisions || []).find(item => String(item.label || '').toLowerCase().startsWith(`${String(best.decision).toLowerCase()}:`))?.label)
+        || (((scenarioCatalog?.company_decisions || []).find(item => String(item.label || '').toLowerCase() === String(best.decision).toLowerCase()))?.label)
+        || null
+      : null;
+
+    if (change == null) {
+      steps.push({ tone: 'neutral', text: 'Baseline path is still computing, so no step below is quantified yet.' });
+    } else if (change < 0) {
+      steps.push({ tone: 'hurt', text: `Direction: the model puts this company ${Math.abs(change).toFixed(2)}% below today over the next ${months} months, in the ${summary.current_phase || 'unknown'} phase. Treat the next steps as a turn-around, not an expansion plan.` });
+    } else {
+      steps.push({ tone: 'help', text: `Direction: the model puts this company ${change.toFixed(2)}% above today over the next ${months} months, in the ${summary.current_phase || 'unknown'} phase. The risk here is giving the run back, so protect it rather than chasing it.` });
+    }
+
+    if (peakBar?.year) {
+      steps.push({ tone: 'neutral', text: `Timing: the strongest projected month lands in ${peakBar.year}${peakBar.label ? ` (${peakBar.label})` : ''}. Capital, hiring and launch commitments planned before that window get the friendliest backdrop; ones planned after it inherit the flat part of the path.` });
+    }
+
+    if (crashBar?.year) {
+      const prob = typeof crashBar.prob_pct === 'number' ? ` at ${crashBar.prob_pct.toFixed(1)}% modelled probability` : '';
+      steps.push({ tone: 'hurt', text: `Downside window: the weakest stretch sits in ${crashBar.year}${crashBar.label ? ` (${crashBar.label})` : ''}${prob}. Put a review trigger and a cash floor in place before it, not during it.` });
+    }
+
+    if (best) {
+      steps.push({ tone: 'help', text: `Lean on: "${best.decision}" averaged ${best.with_decision_growth >= 0 ? '+' : ''}${best.with_decision_growth}% across ${best.matched_cases_count} dated episodes in your own file - the best-evidenced move this company has actually taken.`, toggle: ownToggleKey });
+    } else if (bestPeer) {
+      steps.push({
+        tone: bestPeer.with_decision_growth >= 0 ? 'help' : 'hurt',
+        text: `Peer read: your file has no ranked decision of its own yet, but peers who did "${ownLabel(bestPeer.decision)}" averaged ${bestPeer.with_decision_growth >= 0 ? '+' : ''}${bestPeer.with_decision_growth}% over the following three months, across ${bestPeer.matched_cases_count} months on record.`,
+        toggle: ownLabel(bestPeer.decision),
+      });
+    } else if (!recommendationsData) {
+      steps.push({ tone: 'neutral', text: 'Decision evidence is still computing - the move-based steps land here as soon as it returns.' });
+    } else {
+      steps.push({ tone: 'neutral', text: 'Your file does not yet contain an action with three or more dated outcomes, so no company-specific move can be ranked. Adding dated decision rows (with the following months priced) unlocks this list.' });
+    }
+
+    if (peerMove) {
+      steps.push({
+        tone: peerMove.estimated_effect_pct >= 0 ? 'help' : 'hurt',
+        text: `Peer read: peers in the same niche or country who did "${peerMove.label}" saw ${peerMove.estimated_effect_pct >= 0 ? '+' : ''}${peerMove.estimated_effect_pct.toFixed(2)}% over the following three months (${peerMove.observations} months on record across ${peerMove.companies?.length || 1} peer companies).`,
+        toggle: peerMove.label,
+      });
+    }
+
+    if (worst && worst.with_decision_growth < 0) {
+      steps.push({ tone: 'hurt', text: `Avoid repeating: "${worst.decision}" averaged ${worst.with_decision_growth}% across ${worst.matched_cases_count} dated episodes - the weakest outcome in your own history.` });
+    }
+
+    // The unnamed peer cohort. This is what makes the panel work for an institute,
+    // a studio or a single hospital: no competitor file is needed, and nothing here
+    // pretends to be measured from data. It arrives labelled as a hypothesis list.
+    const plan = recommendationsData?.action_plan || null;
+    const sectorInfo = recommendationsData?.general_playbook?.sector || null;
+    const isPrior = item => String(item?.basis || '').includes('playbook');
+    const priorDo = (plan?.do || []).filter(isPrior);
+    const priorAvoid = (plan?.avoid || []).filter(isPrior);
+    const standing = recommendationsData?.standing_state_labels || [];
+
+    if (priorDo.length > 0) {
+      steps.push({
+        tone: 'help',
+        text: `General playbook for ${sectorInfo?.label || 'this kind of organisation'} (unnamed peers, no competitor file needed): ${priorDo.slice(0, 3).map(item => `"${item.action}"`).join(', ')}. ${priorDo[0]?.why || ''} These are hypotheses to test, not results measured from your data.`,
+      });
+    }
+    if (priorAvoid.length > 0) {
+      steps.push({
+        tone: 'hurt',
+        text: `Hold off on: ${priorAvoid.slice(0, 3).map(item => `"${item.action}"`).join(', ')}. ${priorAvoid[0]?.why || ''}`,
+      });
+    }
+    (plan?.environment_checks || []).slice(0, 2).forEach(line => {
+      steps.push({ tone: 'neutral', text: line });
+    });
+    if (standing.length > 0) {
+      steps.push({
+        tone: 'neutral',
+        text: `Evidence quality: ${standing.length} decision field${standing.length === 1 ? ' is' : 's are'} written on almost every month of your file, which describes standing strategy rather than discrete events - so no outcome is measured from them here, and the playbook above carries the weight instead.`,
+      });
+    }
+
+    if (downside != null && downside < 0) {
+      steps.push({ tone: 'neutral', text: `Guardrail: on the model's lower band the path lands ${Math.abs(downside).toFixed(2)}% below today. Set the review trigger there and pre-agree what gets cut if it is reached.` });
+    }
+
+    return steps;
+  }, [forecastData, timingData, recommendationsData, scenarioCatalog, summary]);
+
   // ------------------------------------------------------------ hero reads
   // The engine's span_profile is only filled when a market-return model fits,
   // so it comes back empty for most companies while the timing endpoint still
@@ -611,7 +760,7 @@ function Dashboard({ launch, onProgress, onChangeCompany, seededCompanies }) {
             <b>{currentCompanyName}</b>
             <small>{currentTicker}  |  {profile?.identity?.niche || 'company intelligence'}</small>
           </span>
-          <span className="window-badge"><span className="live-dot" style={{ display: 'inline-block', marginRight: 6, verticalAlign: 1 }} />v3.0 Calibrated</span>
+
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -2019,7 +2168,7 @@ function Dashboard({ launch, onProgress, onChangeCompany, seededCompanies }) {
         )}
 
         {/* PAGE 5: COMPETITORS & DECISIONS */}
-        {activeTab === 5 && recommendationsData && (
+        {activeTab === 5 && (profile || forecastData || recommendationsData) && (
           <div>
             {/* Peer Comparison Chart (Indexed to 100) */}
             {!nicheComparison && <div className="content-card" style={{ marginBottom: '24px' }}>
@@ -2084,26 +2233,39 @@ function Dashboard({ launch, onProgress, onChangeCompany, seededCompanies }) {
             )}
 
             {/* Section 12.6 Recommendations (3 Tiers) */}
+            {recommendationsData ? (
             <div className="content-card">
               <div className="card-title">
                 <span>Historical Decision Evidence & Action Review</span>
                 <span className="provenance-tag">Observed outcomes after dated decisions</span>
               </div>
 
-              {recommendationsData.recommendations.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{recommendationsData.evidence_note} No recommendation is shown until the file contains enough distinct, dated decisions with measurable follow-up outcomes.</p>}
+              {recommendationsData.recommendations?.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{recommendationsData.evidence_note} No recommendation is shown until the file contains enough distinct, dated decisions with measurable follow-up outcomes.</p>}
 
-              {recommendationsData.recommendations.map((rec, idx) => (
+              {recommendationsData.standing_state_labels?.length > 0 && (
+                <div className="standing-note">
+                  <Info size={15} />
+                  <div>
+                    <strong>{recommendationsData.standing_state_labels.length} decision field{recommendationsData.standing_state_labels.length === 1 ? '' : 's'} in this file are written on almost every month.</strong>
+                    {' '}That describes standing strategy, not a discrete event, so its measured outcome is indistinguishable from the company's own average move. Crestfall reports them here instead of turning them into recommendations:
+                    {' '}{recommendationsData.standing_state_labels.slice(0, 6).map(item => `${item.decision} (${item.coverage_pct}% of months)`).join('; ')}
+                    {recommendationsData.standing_state_labels.length > 6 ? `; +${recommendationsData.standing_state_labels.length - 6} more` : ''}
+                  </div>
+                </div>
+              )}
+
+              {(recommendationsData.recommendations || []).map((rec, idx) => (
                 <div 
                   key={idx} 
                   className={`rec-card ${
-                    rec.tier === 'Likely to help' ? 'rec-tier-help' : 
-                    rec.tier === 'Likely to hurt' ? 'rec-tier-hurt' : 'rec-tier-uncertain'
+                    ['Likely to help', 'Historically positive association'].includes(rec.tier) ? 'rec-tier-help' :
+                    ['Likely to hurt', 'Historically negative association'].includes(rec.tier) ? 'rec-tier-hurt' : 'rec-tier-uncertain'
                   }`}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span style={{ 
-                        background: rec.tier === 'Likely to help' ? 'var(--pos-tint)' : rec.tier === 'Likely to hurt' ? 'var(--neg-tint)' : 'var(--surface-2)',
+                        background: ['Likely to help', 'Historically positive association'].includes(rec.tier) ? 'var(--pos-tint)' : ['Likely to hurt', 'Historically negative association'].includes(rec.tier) ? 'var(--neg-tint)' : 'var(--surface-2)',
                         color: rec.tier_color,
                         padding: '4px 10px',
                         borderRadius: '20px',
@@ -2121,9 +2283,44 @@ function Dashboard({ launch, onProgress, onChangeCompany, seededCompanies }) {
                   </div>
 
                   <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>{rec.description}</p>
+
+                  {/* The numbers that make this card different from its siblings. */}
+                  <div className="evidence-strip">
+                    {rec.months_coverage_pct != null && <span>in file <strong>{rec.months_coverage_pct}%</strong> of months</span>}
+                    {rec.above_average_share != null && <span>beat own average <strong>{rec.above_average_share}%</strong></span>}
+                    {rec.company_ordinary_3m_pct != null && <span>company's ordinary 3-month move <strong>{rec.company_ordinary_3m_pct >= 0 ? '+' : ''}{rec.company_ordinary_3m_pct}%</strong></span>}
+                    {rec.matched_cases_count != null && <span><strong>{rec.matched_cases_count}</strong> dated episodes</span>}
+                  </div>
+                  {rec.effect_meaning && <p className="effect-meaning"><Info size={12} /> {rec.effect_meaning}</p>}
+                  {rec.environment_context && <p style={{ fontSize: '12.5px', color: 'var(--text-body)', margin: '0 0 10px', paddingLeft: '10px', borderLeft: '2px solid var(--line-strong)' }}>{rec.environment_context}</p>}
                   {rec.implementation && <div style={{ fontSize: '12px', color: 'var(--text-strong)', marginBottom: '10px' }}><strong>How to implement responsibly:</strong> {rec.implementation}{rec.implementation_steps?.length > 0 && <ol style={{ margin: '6px 0 0 18px', padding: 0 }}>{rec.implementation_steps.map((step, stepIdx) => <li key={stepIdx} style={{ margin: '3px 0' }}>{step}</li>)}</ol>}</div>}
 
-                  <div style={{ background: 'var(--surface-2)', padding: '10px 14px', borderRadius: '8px', fontSize: '12px' }}>
+                  {(rec.good_practices?.length > 0 || rec.bad_practices?.length > 0) && (
+                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      {rec.good_practices?.length > 0 && (
+                        <div style={{ background: 'rgba(34, 197, 94, 0.08)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                          <div style={{ fontWeight: '600', color: '#22C55E', marginBottom: '6px', fontSize: '12px' }}>
+                            ✓ Recommended practices
+                          </div>
+                          {rec.good_practices.map((practice, i) => (
+                            <div key={i} style={{ color: 'var(--text-muted)', fontSize: '11px', margin: '3px 0' }}>• {practice}</div>
+                          ))}
+                        </div>
+                      )}
+                      {rec.bad_practices?.length > 0 && (
+                        <div style={{ background: 'rgba(239, 68, 68, 0.08)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                          <div style={{ fontWeight: '600', color: '#EF4444', marginBottom: '6px', fontSize: '12px' }}>
+                            ✗ Practices to avoid
+                          </div>
+                          {rec.bad_practices.map((practice, i) => (
+                            <div key={i} style={{ color: 'var(--text-muted)', fontSize: '11px', margin: '3px 0' }}>• {practice}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div style={{ background: 'var(--surface-2)', padding: '10px 14px', borderRadius: '8px', fontSize: '12px', marginTop: '12px' }}>
                     <div style={{ fontWeight: '600', color: 'var(--text-strong)', marginBottom: '4px' }}>
                       Dated company episodes ({rec.matched_cases_count}):
                     </div>
@@ -2137,16 +2334,118 @@ function Dashboard({ launch, onProgress, onChangeCompany, seededCompanies }) {
               {/* Status Quo "Do Nothing" Card */}
               <div style={{ padding: '16px 20px', background: 'var(--surface-2)', borderRadius: '12px', border: '1px solid var(--line)', marginTop: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <strong>{recommendationsData.do_nothing_path.title}</strong>
+                  <strong>{recommendationsData.do_nothing_path?.title || 'Do-nothing path'}</strong>
                   <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-muted)' }}>
-                    {recommendationsData.do_nothing_path.estimated_growth == null ? 'Forecast unavailable' : `12-month market-price change: ${recommendationsData.do_nothing_path.estimated_growth >= 0 ? '+' : ''}${recommendationsData.do_nothing_path.estimated_growth}%`}
+                    {recommendationsData.do_nothing_path?.estimated_growth == null ? 'Forecast unavailable' : `12-month market-price change: ${recommendationsData.do_nothing_path.estimated_growth >= 0 ? '+' : ''}${recommendationsData.do_nothing_path.estimated_growth}%`}
                   </span>
                 </div>
                 <div style={{ fontSize: '12.5px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                  {recommendationsData.do_nothing_path.description}
+                  {recommendationsData.do_nothing_path?.description || 'No do-nothing comparison was returned for this company.'}
                 </div>
               </div>
             </div>
+            ) : (
+              <div className="content-card" style={{ marginBottom: '24px' }}>
+                <div className="card-title">
+                  <span>Historical Decision Evidence & Action Review</span>
+                  <span className="recomputing-chip"><RefreshCw size={12} /> still warming</span>
+                </div>
+                <p className="card-lede" style={{ marginBottom: 0 }}>
+                  The second-heaviest call on this page: it re-forecasts the do-nothing path and scores every dated
+                  decision in the file against its follow-up prices. The peer chart above and the steps below are
+                  already usable while it runs.
+                </p>
+              </div>
+            )}
+
+            {/* Small action list: what to actually do next, from this company's numbers */}
+            <div className="content-card" style={{ marginTop: '24px' }}>
+              <div className="card-title">
+                <span>Recommended next steps</span>
+                <span className="provenance-tag">Read from this company's path, timing and dated decisions</span>
+              </div>
+              <ol className="reco-steps">
+                {nextSteps.map((step, index) => (
+                  <li key={index} className={`reco-step reco-step-${step.tone}`}>
+                    <span>{step.text}</span>
+                    {step.toggle && (
+                      <button
+                        type="button"
+                        className={`bubble-btn ${toggles[step.toggle] ? 'active' : ''}`}
+                        onClick={() => toggleSwitch(step.toggle)}
+                      >
+                        {toggles[step.toggle] ? 'Applied - engine is recomputing' : 'Test it in the forecast'}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ol>
+              <p className="reco-steps-note">
+                Anything marked measured comes from the dated records in the files you supplied. Anything marked general
+                playbook is unnamed sector practice - a hypothesis to test, not a result from your data, and not financial
+                advice. Every number moves with the horizon and the conditions you select.
+              </p>
+            </div>
+
+            {/* Unnamed peer cohort: the general sector playbook.
+                This is what lets an institute, a studio or a single hospital use the
+                panel at all: no competitor file is required and no company is named. */}
+            {recommendationsData?.general_playbook && (() => {
+              const book = recommendationsData.general_playbook;
+              const buckets = { prioritise: [], consider: [], caution: [], hold: [], backlog: [] };
+              (book.moves || []).forEach(move => { (buckets[move.verdict] = buckets[move.verdict] || []).push(move); });
+              const shown = [...buckets.prioritise, ...buckets.consider].slice(0, 8);
+              const holdOff = [...buckets.caution, ...buckets.hold];
+              return (
+                <div className="content-card" style={{ marginTop: '24px' }}>
+                  <div className="card-title">
+                    <span><Layers size={17} style={{ color: 'var(--pink)' }} /> Peer playbook - what organisations like this one publicly do</span>
+                    <span className="provenance-tag">{book.sector.label} · no competitor file needed</span>
+                  </div>
+                  <p className="card-lede">{book.sector.shape}</p>
+                  <p className="playbook-policy"><Info size={13} /> {book.naming_policy}</p>
+
+                  <div className="playbook-grid">
+                    {shown.map(move => (
+                      <article key={move.id} className={`playbook-card playbook-${move.verdict}`}>
+                        <header className="playbook-head">
+                          <span>{move.family_label}</span>
+                          <span className={`playbook-verdict verdict-${move.verdict}`}>{move.verdict}</span>
+                        </header>
+                        <h4>{move.name}</h4>
+                        <p className="playbook-what">{move.what}</p>
+                        <div className="playbook-band">
+                          <span>reference band</span>
+                          <strong>{move.reference_band_pct[0]}% to +{move.reference_band_pct[1]}%</strong>
+                          <em>{move.band_meaning}</em>
+                        </div>
+                        <p className="playbook-why">{move.why}</p>
+                        <details className="playbook-check">
+                          <summary>How to test it here</summary>
+                          <ol>{(move.check || []).map((step, i) => <li key={i}>{step}</li>)}</ol>
+                        </details>
+                        <p className="playbook-risk"><ShieldAlert size={13} /> {move.risk}</p>
+                        <p className="playbook-provenance">{move.provenance}</p>
+                      </article>
+                    ))}
+                  </div>
+
+                  {holdOff.length > 0 && (
+                    <p className="playbook-hold"><ShieldAlert size={14} /> <strong>Usually hold off on:</strong> {holdOff.slice(0, 4).map(move => move.name).join(', ')}.</p>
+                  )}
+
+                  <ul className="playbook-env">
+                    {(recommendationsData.action_plan?.environment_checks || []).map((line, i) => <li key={i}>{line}</li>)}
+                  </ul>
+
+                  <p className="reco-steps-note">
+                    {book.provenance} Bands are directional priors from publicly reported strategy patterns, fitted to no
+                    file - yours or anyone else's. When your own dated decisions exist they are shown above, measured, and
+                    they take precedence.
+                  </p>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -2190,10 +2489,10 @@ export default function App() {
   };
 
   // Safety valve: if a single endpoint ever fails, the pill must not sit there
-  // waiting for a 100% that cannot arrive. 30s is longer than the whole panel.
+  // waiting for a 100% that cannot arrive. Reduced to 10s for faster failover.
   useEffect(() => {
     if (!showIntro || warm.ready) return undefined;
-    const timer = setTimeout(() => setWarm(current => (current.ready ? current : { ...current, ready: true, task: 'continuing with the data that loaded' })), 30000);
+    const timer = setTimeout(() => setWarm(current => (current.ready ? current : { ...current, ready: true, task: 'continuing with the data that loaded' })), 10000);
     return () => clearTimeout(timer);
   }, [showIntro, warm.ready]);
 
