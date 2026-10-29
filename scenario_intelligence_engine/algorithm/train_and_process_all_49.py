@@ -229,7 +229,7 @@ def process_and_train_all():
         "metadata": {
             "total_companies": len(all_companies),
             "generated_date": "2026-10-26",
-            "model_engine": "Crestfall Multi-Factor Econometric Engine v3.0"
+            "model_engine": "Crestfall Multi-Factor Econometric Engine"
         }
     }
     with open(OUTPUT_JSON_PATH, "w", encoding="utf-8") as f:

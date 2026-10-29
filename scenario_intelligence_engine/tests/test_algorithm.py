@@ -31,7 +31,7 @@ from algorithm.simulator import FinancialSimulator, SimulationResult
 from algorithm.permutation_matrix import PermutationEngine
 from algorithm.calibration import ModelCalibrator
 
-def get_test_company() -> Tuple_Data:
+def get_test_company() -> tuple:
     with open(os.path.join(PROJECT_ROOT, "data", "sample_database.json"), "r") as f:
         data = json.load(f)
     aapl_raw = data["companies"][0]

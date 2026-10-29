@@ -77,6 +77,17 @@ export default function WelcomeGate({ apiBase, onLaunch, initialCompanyId, seede
 
   const importCsv = async (file) => {
     if (!file) return;
+    // CSV only, enforced here as well as on the server: the engine parses rows
+    // as delimited text, so a workbook or JSON export would produce a confusing
+    // "no date column" error instead of a clear refusal.
+    if (/\.(xlsx|xls|parquet|json|txt|tsv|zip|numbers|ods)$/i.test(file.name)) {
+      setImportMessage(`${file.name.split('.').pop().toUpperCase()} is not supported. Crestfall takes .csv files only - export this one as CSV first.`);
+      return;
+    }
+    if (!/\.csv$/i.test(file.name)) {
+      setImportMessage('Crestfall takes .csv files only. Add a plain CSV export of the dataset.');
+      return;
+    }
     if (file.size > 50 * 1024 * 1024) { setImportMessage('That file is larger than 50 MB. Trim it and try again.'); return; }
     setImporting(true);
     setImportMessage('Reading the CSV and building the monthly series...');

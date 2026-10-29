@@ -595,13 +595,13 @@ function runModelTrainingUI() {
   setTimeout(() => {
     resultBox.innerHTML = `
       <div class="calib-success-card">
-        <div class="success-header">Model Optimization & Training Complete (Checkpoint 5)</div>
+        <div class="success-header">Model Optimization & Training Complete</div>
         <div class="calib-stat-grid">
-          <div class="calib-stat"><span>Event Calibrated:</span> <strong>COVID-19 Pandemic (2020-2022)</strong></div>
+          <div class="calib-stat"><span>Event:</span> <strong>COVID-19 Pandemic (2020-2022)</strong></div>
           <div class="calib-stat"><span>Optimization Objective:</span> <strong>MAPE Minimization on Reported Revenue</strong></div>
           <div class="calib-stat"><span>Historical Samples:</span> <strong>8 Quarters (24 Reported Months)</strong></div>
           <div class="calib-stat"><span>Pre-Calibration Error:</span> <span class="neg">18.4% MAPE</span></div>
-          <div class="calib-stat"><span>Calibrated Loss:</span> <span class="pos">4.2% MAPE (Optimal)</span></div>
+          <div class="calib-stat"><span>Final Loss:</span> <span class="pos">4.2% MAPE (Optimal)</span></div>
           <div class="calib-stat"><span>Optimal Demand Elasticity:</span> <strong>0.85</strong></div>
           <div class="calib-stat"><span>Optimal Supply Sensitivity:</span> <strong>0.95</strong></div>
           <div class="calib-stat"><span>Decay Rate Convergence:</span> <span class="pos">Converged (lambda = 0.086/mo)</span></div>

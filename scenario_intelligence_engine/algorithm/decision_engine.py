@@ -12,7 +12,8 @@ Directly implements the decisions and peer_decisions tables from the schema:
 """
 
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from .sector_strategies import UniversalSectorStrategies, SectorClassifier
 
 @dataclass
 class DecisionImpact:
@@ -98,5 +99,123 @@ class DecisionEngine:
         # 9. CREDIT RATING DOWNGRADE
         if getattr(config, 'credit_rating_downgrade', False):
             impact.interest_rate_spread_add += 0.0175 # +175 bps borrowing cost penalty
+
+        return impact
+
+    @staticmethod
+    def evaluate_universal_strategy(
+        month: int,
+        base_revenue: float,
+        base_cogs: float,
+        base_opex: float,
+        base_capex: float,
+        strategy_type: str,
+        magnitude: float,
+        magnitude_unit: str,
+        pricing_power: float = 1.0,
+        strategies_manager: Optional[UniversalSectorStrategies] = None
+    ) -> DecisionImpact:
+        """
+        Evaluate a universal sector strategy when peer-specific data is unavailable.
+
+        Args:
+            month: Current simulation month
+            base_revenue: Base revenue for the period
+            base_cogs: Base cost of goods sold
+            base_opex: Base operating expenses
+            base_capex: Base capital expenditures
+            strategy_type: Type of strategy (hiring, capex_change, product_launch, etc.)
+            magnitude: Magnitude of the strategy implementation
+            magnitude_unit: Unit of magnitude (percent, amount, etc.)
+            pricing_power: Company's pricing power (affects revenue impact)
+            strategies_manager: Optional universal strategies manager
+
+        Returns:
+            DecisionImpact object with estimated effects
+        """
+        impact = DecisionImpact()
+
+        if strategies_manager is None:
+            strategies_manager = UniversalSectorStrategies()
+
+        # Get impact estimates for this strategy type
+        impact_info = strategies_manager.get_strategy_impact_estimates(strategy_type)
+
+        # Convert magnitude to a multiplier if needed
+        if magnitude_unit == "percent":
+            magnitude_factor = magnitude / 100.0
+        else:
+            magnitude_factor = magnitude / max(1.0, base_revenue)  # Normalize by revenue
+
+        # Apply strategy-specific impacts
+        if strategy_type == "hiring":
+            # Hiring increases OpEx but can boost revenue
+            impact.opex_delta_usd_m += base_opex * magnitude_factor
+            impact.revenue_multiplier *= (1.0 + magnitude_factor * 0.5 * pricing_power)
+
+        elif strategy_type == "layoffs":
+            # Layoffs reduce OpEx but may slightly reduce revenue
+            if month == 1:
+                # One-time severance cost
+                impact.opex_delta_usd_m += base_opex * magnitude_factor * 0.5
+            else:
+                # Recurring OpEx savings
+                impact.opex_delta_usd_m -= base_opex * magnitude_factor
+                impact.revenue_multiplier *= (1.0 - magnitude_factor * 0.15)
+
+        elif strategy_type == "capex_change":
+            # Capex changes affect investment and future capacity
+            impact.capex_multiplier *= (1.0 + magnitude_factor)
+            # Revenue impact is delayed (minimal in first 3 months)
+            if month > 3:
+                ramp = min(1.0, (month - 3) / 6.0)
+                impact.revenue_multiplier *= (1.0 + magnitude_factor * 0.3 * ramp)
+
+        elif strategy_type == "acquisition":
+            # Acquisitions combine investment and operational changes
+            impact.capex_multiplier *= (1.0 + magnitude_factor * 0.5)
+            impact.opex_delta_usd_m += base_opex * magnitude_factor * 0.3
+            # Revenue boost from synergy (delayed)
+            if month > 6:
+                ramp = min(1.0, (month - 6) / 12.0)
+                impact.revenue_multiplier *= (1.0 + magnitude_factor * 0.4 * ramp)
+
+        elif strategy_type == "product_launch":
+            # Product launches have upfront costs and delayed revenue
+            if month <= 3:
+                impact.opex_delta_usd_m += base_opex * magnitude_factor * 0.5
+            else:
+                # S-curve adoption
+                ramp = min(1.0, (month - 3) / 6.0)
+                impact.revenue_multiplier *= (1.0 + magnitude_factor * 0.8 * ramp)
+
+        elif strategy_type == "price_change":
+            # Price changes directly affect revenue with volume trade-off
+            effective_price_change = magnitude_factor * pricing_power
+            impact.revenue_multiplier *= (1.0 + effective_price_change)
+
+        elif strategy_type == "cost_cut":
+            # Cost cutting improves margins
+            impact.cogs_multiplier *= (1.0 - magnitude_factor)
+            impact.opex_delta_usd_m -= base_opex * magnitude_factor * 0.5
+
+        elif strategy_type == "buyback":
+            # Buybacks return capital to shareholders
+            impact.buyback_monthly_usd_m = base_revenue * magnitude_factor * 0.1
+
+        else:
+            # Unknown strategy type - use general estimates from config
+            impact_range = impact_info.get("typical_impact_range", [0.0, 0.0])
+            if impact_range:
+                avg_impact = sum(impact_range) / 2
+                normalized_impact = avg_impact * magnitude_factor
+
+                impact_type = impact_info.get("impact_type", "unknown")
+                if "opex" in impact_type.lower() or "cost" in impact_type.lower():
+                    impact.opex_delta_usd_m += base_opex * normalized_impact
+                elif "revenue" in impact_type.lower():
+                    impact.revenue_multiplier *= (1.0 + normalized_impact)
+                elif "investment" in impact_type.lower():
+                    impact.capex_multiplier *= (1.0 + normalized_impact)
 
         return impact

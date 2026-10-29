@@ -218,7 +218,11 @@ export default function ScenarioLab({
         {statsByCategory.own?.total === 0 && (
           <p className="lab-note">
             <Info size={12} />
-            <span><b>Our Strategic Decisions</b> is empty for this company. Its file writes the same generic decision wording on every row, so there are no distinct dated decisions to group. A condition appears here only when at least two distinguishable dated cases exist - nothing is invented. Companies whose files carry real decision text do populate this umbrella.</span>
+            <span><b>Our Strategic Decisions</b> is empty for this company. Its file writes the same decision wording on
+            every month, so there is nothing discrete to date and no outcome to measure - Crestfall now detects that by
+            coverage instead of turning it into a number that repeats across every card. A condition appears here only
+            when at least two distinguishable dated cases exist. For the peer view that needs no competitor file, see
+            <b> Peer playbook</b> at the bottom of Ask &amp; Explore.</span>
           </p>
         )}
 
