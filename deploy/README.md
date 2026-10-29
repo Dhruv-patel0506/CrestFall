@@ -82,19 +82,41 @@ the one.
 
 ---
 
-## Option 3 — zero cost, zero infra: your laptop + a named tunnel
+## Option 3 — zero cost, zero infra: your laptop + the keeper
 
-For a demo where you control the moment:
+For a demo where you control the moment, one command installs a watchdog that owns both
+halves and never lets either one slip:
 
 ```powershell
-cd d:\Rocast\scenario_intelligence_engine
-.\start-crestfall.bat                                  # keeps the engine alive, auto-restarts
-cloudflared tunnel --url http://localhost:8000         # public https:// URL
+cd d:\Rocast\deploy
+.\install-crestfall-startup.ps1     # once: autostart at logon + no idle sleep on AC
 ```
 
-Free, live compute, no precomputation — and it dies when the lid closes, the Wi-Fi drops, or the
-venue network blocks outbound tunnels. **Do not put this URL on a CV.** A named Cloudflare or
-Tailscale funnel makes it stable-ish, but your machine is still the server.
+That drops a shortcut in your Startup folder, so `crestfall-keepalive.ps1` runs every time
+Windows starts. It launches `python main.py` and `cloudflared`, probes `/api/health` every
+20 s, restarts whichever one died, and writes the live public link to
+`deploy\tunnel-url.txt` (also onto the clipboard whenever it changes).
+
+```powershell
+deploy\get-tunnel-url.ps1                    # print + copy the link, with a real probe
+deploy\get-tunnel-url.ps1 -Open              # ...and open it
+deploy\stop-crestfall.ps1                    # stop keeper + engine + tunnel
+deploy\install-crestfall-startup.ps1 -Remove # undo the autostart
+```
+
+Two details worth knowing before you trust it:
+
+- Health failures must stack up (6 in a row) before the engine is restarted, because a
+  peer-comparison legitimately occupies the single worker for 40 s. A slow server is not a
+  dead one, and killing it mid-forecast would break the demo you are watching.
+- The keeper **adopts** a live engine and tunnel when it restarts, so a link you already
+  pasted into a chat stays valid. Only `-RestartAll`, or a tunnel that must be recycled,
+  mints a new one.
+
+Free, live compute, no precomputation — and it dies when the lid closes on battery, the
+Wi-Fi drops, or the venue network blocks outbound tunnels. **Do not put this URL on a CV.**
+A named Cloudflare or Tailscale funnel makes it stable-ish, but your machine is still the
+server.
 
 ---
 

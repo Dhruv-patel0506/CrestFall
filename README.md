@@ -33,7 +33,7 @@ and lets you condition that path on real events and decisions instead of invente
     │   ├── src/components/          ScenarioLab, WelcomeGate, IntroTransition, ui
     │   ├── src/data/festivals.js    world festival & shopping calendar
     │   ├── src/index.css            "Aurora Ink" design system (dark + light)
-    │   └── vercel.json              SPA rewrites for Vercel
+    │   └── vercel.json              SPA rewrites + /api proxy to the EC2 engine
     ├── data/
     │   ├── sample_database.json     company registry metadata
     │   └── scenario_catalog_cache.json  cached cross-company event evidence
@@ -92,40 +92,50 @@ Dev mode with hot reload: `npm run dev` in `frontend/` (port 5173) plus `set CRE
 before `python main.py`. Auto-reload is off by default because watching a 2 GB folder can restart
 the server mid-demo and drop every warm cache.
 
-## Hosting on Vercel
+## Live deployment (Vercel + AWS EC2)
 
-Vercel can host the **frontend**. It cannot host this **engine** — the API is a long-lived Python
-process that reads ~2 GB of CSVs, and a single forecast takes 5–40 s of CPU, which does not fit
-serverless functions. So the split is:
+Vercel hosts the **frontend** only. The API is a long-lived Python process that reads ~2 GB of CSVs
+and a forecast takes 5–40 s of CPU, which does not fit serverless functions, so the engine runs on
+an always-on AWS EC2 instance.
 
 | Piece | Where |
 |---|---|
-| React app | Vercel |
-| Python engine | a persistent host: your PC + a tunnel, or Render / Fly.io / a small VPS |
+| React app | Vercel project `crestfall-frontend` → https://crestfall-frontend.vercel.app |
+| Python engine | AWS EC2 `t3.micro` (free tier), Docker container `crestfall-backend`, Elastic IP `13.55.43.139`, port 8000 |
 
-**Vercel project settings**
+**How they connect.** A browser refuses to let an HTTPS page call a plain-HTTP API (mixed content),
+so the app calls its own origin `/api` (`frontend/.env.production`: `VITE_API_BASE=/api`) and
+`frontend/vercel.json` rewrites `/api/*` to `http://13.55.43.139:8000/api/*`. No CORS or
+certificate setup is needed on the engine.
 
-- Framework preset: **Vite**
-- Root Directory: **`scenario_intelligence_engine/frontend`**
-- Build command: `npm run build` · Output directory: `dist`
-- Environment variable: `VITE_API_BASE = https://<your-engine-host>/api`  ← required
-
-`vercel.json` in that folder already handles SPA rewrites. Without `VITE_API_BASE` the app calls
-`/api` on its own origin, which on Vercel is a 404 — the app will load but every panel will be empty.
-
-**Cheapest way to get a shareable link today**
+**Redeploy the frontend**
 
 ```bash
-# on the machine that has the data
-start-crestfall.bat                       # serves :8000
-cloudflared tunnel --url http://localhost:8000   # prints a public https URL
+cd scenario_intelligence_engine/frontend
+vercel --prod --yes
 ```
 
-Put that tunnel URL in `VITE_API_BASE`, redeploy Vercel, and the Vercel site talks to your engine.
-Keep the laptop awake (Plug in → Sleep = Never) or the link dies.
+**Update the engine on EC2** (the 49 CSVs sit in `/opt/CrestFall/scenario_intelligence_engine/new_data`
+on the server, bind-mounted into the container, never in git)
 
-**Cleaner permanent option:** deploy the engine to Render/Fly (disk ≥ 2 GB, RAM ≥ 1 GB), set
-`VITE_API_BASE` to it, and Vercel + the engine are both always up.
+```bash
+scp -i <key.pem> scenario_intelligence_engine/main.py ubuntu@13.55.43.139:/tmp/main_new.py
+ssh -i <key.pem> ubuntu@13.55.43.139 "cd /opt/CrestFall/scenario_intelligence_engine && sudo cp /tmp/main_new.py main.py && sudo docker compose up -d --build"
+```
+
+**Why it stays up without anyone watching**
+
+- `restart: unless-stopped` plus Docker enabled at boot: the container returns after a crash or reboot.
+- A Python-based Docker healthcheck, and `deploy/ec2-watchdog.sh` (cron, every minute) restarts the
+  container if `/api/health` stops answering.
+- The Elastic IP stays with the instance through a stop/start, so `vercel.json` never has to change.
+
+**Memory.** The instance has about 1 GB of RAM, so the engine streams each 45 MB CSV instead of
+holding every row in memory (loading them whole used ~700 MB per file and got the process killed).
+After any restart the first peer comparison can take up to ~100 s while the monthly cache warms in
+the background (~8 min); afterwards it answers in seconds.
+
+Other hosting options (VPS, laptop + tunnel) are written up in `deploy/README.md`.
 
 ## Tests
 

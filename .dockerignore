@@ -1,0 +1,20 @@
+# Keep the 2 GB dataset, the toolchains and the local environment out of the
+# build context - the image mounts company data at run time instead.
+.git
+.gitignore
+**/node_modules
+**/__pycache__
+**/*.pyc
+.venv
+**/.venv
+scenario_intelligence_engine/new_data
+scenario_intelligence_engine/data/uploads
+scenario_intelligence_engine/frontend/src
+scenario_intelligence_engine/frontend/node_modules
+scenario_intelligence_engine/tests
+release
+deploy
+*.md
+*.pptx
+*.mp4
+*.png

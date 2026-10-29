@@ -1,0 +1,37 @@
+# Crestfall - run the engine and the app as one service.
+#
+#   docker compose -f deploy/docker-compose.yml up --build
+#   open http://localhost:8000
+#
+# Build context is the repository root, because the image copies from
+# scenario_intelligence_engine/.
+services:
+  crestfall:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: crestfall:latest
+    container_name: crestfall
+    ports:
+      - "8000:8000"
+    environment:
+      # The 2 GB company panel is mounted, never baked into the image. Point this
+      # at any folder of Crestfall-shaped CSVs; leave it empty to run on uploads
+      # through the UI only.
+      CRESTFALL_NEW_DATA_DIR: /data/new_data
+      CRESTFALL_PORT: "8000"
+    volumes:
+      - ../scenario_intelligence_engine/new_data:/data/new_data
+      # Uploads and the derived evidence catalog persist across restarts, so a
+      # container does not rebuild the 49-company catalog (62 s) on every boot.
+      - crestfall-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=10)"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  crestfall-data:

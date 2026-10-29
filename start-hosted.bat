@@ -1,28 +1,12 @@
 @echo off
-echo Starting Crestfall Backend + Cloudflare Tunnel...
+REM ---------------------------------------------------------------------------
+REM Kept for muscle memory: this used to open two bare cmd windows (engine and
+REM cloudflared) and leave you to notice when either one died. It now just
+REM hands over to the keeper, which restarts both and records the public link.
+REM ---------------------------------------------------------------------------
+echo Starting Crestfall under the keeper (engine + tunnel, self-healing)...
 echo.
-
-echo [1/2] Starting Python backend on port 8000...
-cd scenario_intelligence_engine
-start "Crestfall Backend" cmd /k ".venv\Scripts\python main.py"
-echo Backend started in new window.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0deploy\crestfall-keepalive.ps1"
 echo.
-
-echo [2/2] Starting Cloudflare Tunnel...
-cd ..
-start "Cloudflare Tunnel" cmd /k ".\cloudflared.exe tunnel --url http://localhost:8000"
-echo Tunnel started in new window.
-echo.
-
-echo ========================================
-echo Both services are running!
-echo ========================================
-echo Backend: http://localhost:8000
-echo Tunnel URL: (check the Cloudflare Tunnel window)
-echo Frontend: https://frontend-red-eta-80.vercel.app
-echo Dataset Import Limit: 150MB
-echo.
-echo Keep both windows open for the app to work.
-echo Close both windows to stop.
-echo ========================================
+echo Keeper stopped.
 pause

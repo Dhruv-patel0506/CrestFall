@@ -31,6 +31,10 @@ __pycache__/
 # Local runs, scratch & OS noise
 # ---------------------------------------------------------------------------
 *.log
+# The live quick-tunnel link changes every time the tunnel restarts - machine
+# generated, never a committed value.
+deploy/tunnel-url.txt
+deploy/logs/
 .backup/
 scripts/
 .DS_Store
@@ -47,3 +51,22 @@ desktop.ini
 .env
 .env.local
 .env.*.local
+
+# ---------------------------------------------------------------------------
+# Local-only artifacts (kept on disk, never committed)
+# ---------------------------------------------------------------------------
+# Tunnel binary and release bundles - large, rebuilt by deploy/make-release.ps1
+/cloudflared.exe
+/release/
+*.exe
+*.zip
+# Sample company CSVs for trying the upload screen (~50 MB each)
+/*.csv
+# Windows redirect leftover and script output
+/nul
+*.out
+# Abandoned GitHub Pages landing-page experiment; its workflow would run on every push
+/site/
+/.github/workflows/pages.yml
+# Vercel CLI link metadata
+.vercel/
