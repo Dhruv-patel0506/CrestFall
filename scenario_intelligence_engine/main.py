@@ -30,6 +30,8 @@ from algorithm.simulator import FinancialSimulator
 from algorithm.shock_primitives import get_niche_elasticity, NICHE_ELASTICITIES
 from algorithm.permutation_matrix import PermutationEngine
 from algorithm.forecast_model import forecast_monthly_close
+from algorithm.sector_strategies import UniversalSectorStrategies, get_universal_recommendations
+from algorithm.sector_playbooks import build_playbook, detect_states
 
 app = FastAPI(
     title="Crestfall API",
@@ -257,7 +259,7 @@ class RecommendationsRequest(BaseModel):
 def health_check():
     return {
         "status": "healthy",
-        "engine": "Crestfall Engine v3.0 (FastAPI)",
+        "engine": "Crestfall Engine (FastAPI)",
         "companies_loaded": len(COMPANIES_REGISTRY),
         "timestamp": datetime.utcnow().isoformat()
     }
@@ -283,12 +285,20 @@ def list_companies():
 @app.post("/api/companies/upload")
 def upload_company_csv(req: CompanyCSVUpload):
     """Register a user-provided time-series CSV for the existing analysis API."""
-    if len(req.csv_text.encode("utf-8")) > 50 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="CSV uploads must be 50 MB or smaller.")
+    if len(req.csv_text.encode("utf-8")) > 1024 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="CSV uploads must be 1 GB or smaller.")
+    # CSV only, and checked by shape rather than by file name, which a client
+    # can always get wrong. A JSON export or a binary workbook would otherwise
+    # reach the row parser and fail later with an unhelpful "no date column".
+    leading = req.csv_text.lstrip("\ufeff").lstrip()
+    if leading.startswith(("{", "[", "<")) or "\x00" in req.csv_text[:8192] or leading[:2] == "PK":
+        raise HTTPException(status_code=415, detail="Crestfall accepts .csv files only. Export this dataset as CSV and try again.")
     try:
         reader = csv.DictReader(io.StringIO(req.csv_text.lstrip("\ufeff")))
         if not reader.fieldnames:
             raise HTTPException(status_code=400, detail="The CSV needs a header row.")
+        if len([name for name in reader.fieldnames if name]) < 2:
+            raise HTTPException(status_code=415, detail="That does not look like a CSV: the header row has no delimiter. Export the dataset as .csv with one column per field.")
         aliases = {field: re.sub(r"[^a-z0-9]+", "_", (field or "").strip().lower()).strip("_") for field in reader.fieldnames}
         raw_rows = [{aliases[key]: (value or "").strip() for key, value in row.items() if key in aliases} for row in reader]
         rows_received = len(raw_rows)
@@ -599,10 +609,19 @@ def get_company_strengths(company_id: str, peer_group: str = "niche"):
             "pros": pros, "cons": cons,
         }
     niche = c.get("niche", "General")
-    
+
     # Identify peers in the same niche
     peers = [comp for comp in COMPANIES_REGISTRY.values() if comp.get("niche", "").lower() == niche.lower() or peer_group == "country" and comp.get("main_country") == c.get("main_country")]
-    total_peers = max(4, len(peers))
+
+    # If no peers available, use universal sector strategies for context
+    if not peers:
+        strategies_manager = UniversalSectorStrategies()
+        sector_info = strategies_manager.get_strategies_for_company(niche, c.get("company_name", ""))
+        total_peers = 0  # No specific peers, but we have sector context
+        use_sector_context = True
+    else:
+        total_peers = max(4, len(peers))
+        use_sector_context = False
 
     fin = c.get("financials", {})
     rev = fin.get("revenue_usd_m", 10000.0)
@@ -613,18 +632,44 @@ def get_company_strengths(company_id: str, peer_group: str = "niche"):
     margin = (ebit / max(1.0, rev)) * 100.0
     de_ratio = (debt / max(1.0, equity)) * 100.0
 
-    return {
-        "company_id": c["company_id"],
-        "peer_group": peer_group,
-        "total_peers": total_peers,
-        "metrics": [
-            { "name": "Operating Margin", "value": f"{margin:.1f}%", "rank": 2, "total_peers": total_peers, "status": "pro" },
-            { "name": "YoY Revenue Growth", "value": "12.4%", "rank": 3, "total_peers": total_peers, "status": "pro" },
-            { "name": "Cash Runway", "value": "Self-Sustaining", "rank": 1, "total_peers": total_peers, "status": "pro" },
-            { "name": "Debt-to-Equity", "value": f"{de_ratio:.1f}%", "rank": 2, "total_peers": total_peers, "status": "pro" },
-            { "name": "Historical Earnings Stability", "value": "Beta 0.88", "rank": 4, "total_peers": total_peers, "status": "con" }
-        ],
-        "pros": [
+    # Build response with or without sector context
+    if use_sector_context:
+        strategies_manager = UniversalSectorStrategies()
+        sector_info = strategies_manager.get_strategies_for_company(niche, c.get("company_name", ""))
+
+        # Generate sector-based pros/cons
+        pros = [
+            {
+                "title": f"Aligned with {sector_info.label} Sector Trends",
+                "desc": f"Company operates in the {sector_info.label} sector where key trends include: {', '.join(sector_info.sector_trends[:3])}.",
+                "linked_to": "Sector Analysis",
+                "type": "sector"
+            },
+            {
+                "title": f"{sector_info.label} Competitive Factors",
+                "desc": f"Key competitive factors in this sector: {', '.join(sector_info.competitive_factors[:3])}.",
+                "linked_to": "Sector Context",
+                "type": "sector"
+            }
+        ]
+
+        cons = [
+            {
+                "title": "No Direct Peer Comparisons Available",
+                "desc": "Specific peer competitors were not found in the dataset. Analysis uses universal sector patterns instead of direct peer benchmarking.",
+                "linked_to": "Data Limitation",
+                "type": "limitation"
+            }
+        ]
+
+        metrics = [
+            { "name": "Operating Margin", "value": f"{margin:.1f}%", "rank": None, "total_peers": 0, "status": "observed" },
+            { "name": "Debt-to-Equity", "value": f"{de_ratio:.1f}%", "rank": None, "total_peers": 0, "status": "observed" },
+            { "name": "Cash Position", "value": f"${cash:,.0f}M", "rank": None, "total_peers": 0, "status": "observed" },
+        ]
+    else:
+        # Original peer-based logic
+        pros = [
             {
                 "title": f"Leading {niche} Market Moat",
                 "desc": "High customer retention and pricing power allow inflation pass-through without volume loss.",
@@ -643,8 +688,9 @@ def get_company_strengths(company_id: str, peer_group: str = "niche"):
                 "linked_to": "Conservative Capital Allocation",
                 "type": "decision"
             }
-        ],
-        "cons": [
+        ]
+
+        cons = [
             {
                 "title": "Macro Sensitivity to Interest Rate Hikes",
                 "desc": "Extended valuation multiples contract if 10-Year sovereign yields rise by over 150bps.",
@@ -658,6 +704,23 @@ def get_company_strengths(company_id: str, peer_group: str = "niche"):
                 "type": "event"
             }
         ]
+
+        metrics = [
+            { "name": "Operating Margin", "value": f"{margin:.1f}%", "rank": 2, "total_peers": total_peers, "status": "pro" },
+            { "name": "YoY Revenue Growth", "value": "12.4%", "rank": 3, "total_peers": total_peers, "status": "pro" },
+            { "name": "Cash Runway", "value": "Self-Sustaining", "rank": 1, "total_peers": total_peers, "status": "pro" },
+            { "name": "Debt-to-Equity", "value": f"{de_ratio:.1f}%", "rank": 2, "total_peers": total_peers, "status": "pro" },
+            { "name": "Historical Earnings Stability", "value": "Beta 0.88", "rank": 4, "total_peers": total_peers, "status": "con" }
+        ]
+
+    return {
+        "company_id": c["company_id"],
+        "peer_group": peer_group,
+        "total_peers": total_peers,
+        "use_sector_context": use_sector_context,
+        "metrics": metrics,
+        "pros": pros,
+        "cons": cons,
     }
 
 
@@ -667,6 +730,8 @@ _MONTHLY_CACHE_LOCKS: Dict[str, threading.Lock] = {}
 _MONTHLY_CACHE_LOCKS_GUARD = threading.Lock()
 DAILY_SERIES_CACHE: Dict[tuple, List[Dict[str, Any]]] = {}
 _DAILY_SERIES_CACHE_LOCK = threading.RLock()
+_RAW_CSV_CACHE: Dict[str, List[Dict[str, str]]] = {}
+_RAW_CSV_CACHE_LOCK = threading.RLock()
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 def format_month_label(ym: str) -> str:
@@ -698,6 +763,28 @@ def _clean_upload_number(value: Any) -> Optional[float]:
         return number if math.isfinite(number) else None
     except (TypeError, ValueError):
         return None
+
+def _load_raw_csv_data(csv_path: str) -> List[Dict[str, str]]:
+    """Load and cache raw CSV data for a file. Returns list of row dicts with string values."""
+    with _RAW_CSV_CACHE_LOCK:
+        if csv_path in _RAW_CSV_CACHE:
+            return _RAW_CSV_CACHE[csv_path]
+        
+        if not csv_path or not os.path.isfile(csv_path):
+            return []
+        
+        raw_rows = []
+        with open(csv_path, "r", encoding="utf-8", errors="ignore", newline="") as source:
+            reader = csv.DictReader(source)
+            for row in reader:
+                raw_rows.append(dict(row))
+        
+        _RAW_CSV_CACHE[csv_path] = raw_rows
+        # Cap cache to prevent memory bloat
+        while len(_RAW_CSV_CACHE) > 50:
+            _RAW_CSV_CACHE.pop(next(iter(_RAW_CSV_CACHE)))
+        
+        return raw_rows
 
 def _clean_upload_date(value: Any) -> str:
     text = str(value or "").strip()
@@ -777,6 +864,19 @@ def find_csv_for_company(company_id: str, company_name: str = "", ticker: str = 
         compact_slug = slug.replace("_", "")
         if any(len(key) >= 5 and key.replace("_", "") in compact_slug for key in keys):
             return path
+    # Registry ids are tickers while filenames use the brand (TSM vs tsmc).
+    # Accept a prefix only when exactly one file could take it, so an
+    # abbreviation can never silently borrow another company's data.
+    prefix_matches = []
+    for slug, path in keyed:
+        tokens = slug.split("_")
+        if any(
+            len(key) >= 3 and any(token.startswith(key) and token != key for token in tokens)
+            for key in keys
+        ):
+            prefix_matches.append(path)
+    if len(set(prefix_matches)) == 1:
+        return prefix_matches[0]
     return None
 
 def bind_registry_to_source_files() -> None:
@@ -817,85 +917,96 @@ def _load_company_monthly_data_locked(file_path: str) -> List[Dict[str, Any]]:
     monthly: Dict[str, Dict[str, Any]] = {}
     if not file_path or not os.path.exists(file_path):
         return []
-    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-        reader = csv.DictReader(f)
-        COMPANY_CSV_FIELDS[file_path] = set(reader.fieldnames or [])
-        for row in reader:
-            d = row.get("date", "")
-            if not d:
+    
+    # Use cached raw CSV data if available for faster loading
+    raw_rows = _load_raw_csv_data(file_path)
+    if not raw_rows:
+        return []
+    
+    COMPANY_CSV_FIELDS[file_path] = set(raw_rows[0].keys()) if raw_rows else set()
+    for row in raw_rows:
+        d = row.get("date", "")
+        if not d:
+            continue
+        ym = d[:7]  # YYYY-MM
+        try:
+            rev = float(row.get("revenue_usd_m") or 0)
+            cogs = float(row.get("cost_of_revenue_usd_m") or 0)
+            close = float(row.get("adjusted_close") or row.get("close") or 0)
+            if close <= 0 or not math.isfinite(close):
                 continue
-            ym = d[:7]  # YYYY-MM
-            try:
-                rev = float(row.get("revenue_usd_m") or 0)
-                cogs = float(row.get("cost_of_revenue_usd_m") or 0)
-                close = float(row.get("adjusted_close") or row.get("close") or 0)
-                if close <= 0 or not math.isfinite(close):
-                    continue
-                prior = monthly.get(ym, {})
-                # Source files have multiple intraday rows per date. Retain the
-                # final observation in each month so price and fundamentals use
-                # the same timestamp instead of mixing first and last rows.
-                monthly[ym] = {
-                    "date": ym,
-                    "last_observation_date": d[:10],
-                    "date_label": format_month_label(ym),
-                    "value": round(close, 4),
+            prior = monthly.get(ym, {})
+            # Source files have multiple intraday rows per date. Retain the
+            # final observation in each month so price and fundamentals use
+            # the same timestamp instead of mixing first and last rows.
+            monthly[ym] = {
+                "date": ym,
+                "last_observation_date": d[:10],
+                "date_label": format_month_label(ym),
+                "value": round(close, 4),
+                "close": close,
+                "adjusted_close": close,
+                "revenue_usd_m": rev,
+                "monthly_revenue_run_rate_usd_m": round(rev / 12.0, 1),
+                "cost_of_revenue_usd_m": cogs,
+                "margin": round(((rev - cogs) / max(1.0, rev)) * 100.0, 1) if rev > 0 else 0.0,
+                "raw_rev": rev,
+                "operating_expense_usd_m": float(row.get("operating_expense_usd_m") or 0),
+                "operating_income_usd_m": float(row.get("operating_income_usd_m") or 0),
+                "net_income_usd_m": float(row.get("net_income_usd_m") or 0),
+                "cash_usd_m": float(row.get("cash_usd_m") or 0),
+                "total_debt_usd_m": float(row.get("total_debt_usd_m") or 0),
+                "total_assets_usd_m": float(row.get("total_assets_usd_m") or 0),
+                "equity_usd_m": float(row.get("equity_usd_m") or 0),
+                "operating_cash_flow_usd_m": float(row.get("operating_cash_flow_usd_m") or 0),
+                "capex_usd_m": float(row.get("capex_usd_m") or 0),
+                "shares_outstanding_m": float(row.get("shares_outstanding_m") or 0),
+                "market_cap_usd_bn": float(row.get("market_cap_usd_bn") or 0),
+                "volume": float(row.get("volume") or 0),
+                "sector_index_close": float(row.get("sector_index_close") or 0),
+                "home_index_close": float(row.get("home_index_close") or 0),
+                "policy_rate_pct": float(row.get("policy_rate_pct") or 0),
+                "cpi_index": float(row.get("cpi_index") or 0),
+                "unemployment_rate_pct": float(row.get("unemployment_rate_pct") or 0),
+                "consumer_confidence_index": float(row.get("consumer_confidence_index") or 0),
+                "gdp_growth_pct": float(row.get("gdp_growth_pct") or 0),
+                "fx_rate_per_usd": float(row.get("fx_rate_per_usd") or 0),
+                "bond_yield_10y_pct": float(row.get("bond_yield_10y_pct") or 0),
+                "product_metrics": {
+                    key: float(row.get(key) or 0)
+                    for key in ("iphone_revenue_usd_m", "services_revenue_usd_m", "wearables_home_acc_usd_m", "mac_revenue_usd_m", "ipad_revenue_usd_m")
+                    if row.get(key) not in (None, "")
+                },
+                "primitive_values": {
+                    key.removeprefix("primitive_"): float(row.get(key) or 0)
+                    for key in ("primitive_demand", "primitive_supply", "primitive_cost", "primitive_competition", "primitive_regulation", "primitive_technology", "primitive_macro", "primitive_pandemic")
+                    if row.get(key) not in (None, "")
+                },
+                "extra_numeric_metrics": {
+                    key: float(row[key])
+                    for key in COMPANY_CSV_FIELDS.get(file_path, set())
+                    if key not in {"open", "high", "low", "close", "adjusted_close", "volume", "date", "company_id", "company_name", "ticker", "exchange", "main_country", "niche", "currency", "fiscal_year_end", "record_provenance", "source_frequency", "event_id", "event_name", "event_category", "event_date", "decision_type", "announced_date", "effective_date", "short_description", "magnitude", "magnitude_unit", "source_url", "source_name"}
+                    and row.get(key) not in (None, "")
+                    and _is_numeric_value(row.get(key))
+                },
+                "metric_values": {
                     "close": close,
-                    "adjusted_close": close,
-                    "revenue_usd_m": rev,
-                    "monthly_revenue_run_rate_usd_m": round(rev / 12.0, 1),
-                    "cost_of_revenue_usd_m": cogs,
-                    "margin": round(((rev - cogs) / max(1.0, rev)) * 100.0, 1) if rev > 0 else 0.0,
-                    "raw_rev": rev,
-                    "operating_expense_usd_m": float(row.get("operating_expense_usd_m") or 0),
-                    "operating_income_usd_m": float(row.get("operating_income_usd_m") or 0),
-                    "net_income_usd_m": float(row.get("net_income_usd_m") or 0),
-                    "cash_usd_m": float(row.get("cash_usd_m") or 0),
-                    "total_debt_usd_m": float(row.get("total_debt_usd_m") or 0),
-                    "total_assets_usd_m": float(row.get("total_assets_usd_m") or 0),
-                    "equity_usd_m": float(row.get("equity_usd_m") or 0),
-                    "operating_cash_flow_usd_m": float(row.get("operating_cash_flow_usd_m") or 0),
-                    "capex_usd_m": float(row.get("capex_usd_m") or 0),
-                    "shares_outstanding_m": float(row.get("shares_outstanding_m") or 0),
-                    "market_cap_usd_bn": float(row.get("market_cap_usd_bn") or 0),
-                    "volume": float(row.get("volume") or 0),
-                    "sector_index_close": float(row.get("sector_index_close") or 0),
-                    "home_index_close": float(row.get("home_index_close") or 0),
-                    "policy_rate_pct": float(row.get("policy_rate_pct") or 0),
-                    "cpi_index": float(row.get("cpi_index") or 0),
-                    "unemployment_rate_pct": float(row.get("unemployment_rate_pct") or 0),
-                    "consumer_confidence_index": float(row.get("consumer_confidence_index") or 0),
-                    "gdp_growth_pct": float(row.get("gdp_growth_pct") or 0),
-                    "fx_rate_per_usd": float(row.get("fx_rate_per_usd") or 0),
-                    "bond_yield_10y_pct": float(row.get("bond_yield_10y_pct") or 0),
-                    "product_metrics": {
-                        key: float(row.get(key) or 0)
-                        for key in ("iphone_revenue_usd_m", "services_revenue_usd_m", "wearables_home_acc_usd_m", "mac_revenue_usd_m", "ipad_revenue_usd_m")
-                        if row.get(key) not in (None, "")
-                    },
-                    "primitive_values": {
-                        key.removeprefix("primitive_"): float(row.get(key) or 0)
-                        for key in ("primitive_demand", "primitive_supply", "primitive_cost", "primitive_competition", "primitive_regulation", "primitive_technology", "primitive_macro", "primitive_pandemic")
-                        if row.get(key) not in (None, "")
-                    },
-                    "extra_numeric_metrics": {
-                        key: float(row[key])
-                        for key in COMPANY_CSV_FIELDS.get(file_path, set())
-                        if key not in {"open", "high", "low", "close", "adjusted_close", "volume", "date", "company_id", "company_name", "ticker", "exchange", "main_country", "niche", "currency", "fiscal_year_end", "record_provenance", "source_frequency", "event_id", "event_name", "event_category", "event_date", "decision_type", "announced_date", "effective_date", "short_description", "magnitude", "magnitude_unit", "source_url", "source_name"}
-                        and row.get(key) not in (None, "")
-                        and _is_numeric_value(row.get(key))
-                    },
-                    "record_provenance": row.get("record_provenance") or "",
-                    "source_frequency": row.get("source_frequency") or "unknown",
-                    "event_records": prior.get("event_records", []),
-                    "decision_records": prior.get("decision_records", []),
-                    "_event_keys": prior.get("_event_keys", set()),
-                    "_decision_keys": prior.get("_decision_keys", set()),
-                }
-                event_name = (row.get("event_name") or "").strip()
-                event_category = (row.get("event_category") or "").strip()
-                event_date = d[:10]
-                if (
+                    "revenue_run_rate": rev / 12.0 if rev else None,
+                    "margin": ((rev - cogs) / max(1.0, rev)) * 100.0 if rev else None,
+                    **{f"product_metrics.{k}": float(row.get(k) or 0) for k in ("iphone_revenue_usd_m", "services_revenue_usd_m", "wearables_home_acc_usd_m", "mac_revenue_usd_m", "ipad_revenue_usd_m") if row.get(k) not in (None, "")},
+                    **{k: float(row[k]) for k in COMPANY_CSV_FIELDS.get(file_path, set()) if k not in {"open", "high", "low", "close", "adjusted_close", "volume", "date", "company_id", "company_name", "ticker", "exchange", "main_country", "niche", "currency", "fiscal_year_end", "record_provenance", "source_frequency", "event_id", "event_name", "event_category", "event_date", "decision_type", "announced_date", "effective_date", "short_description", "magnitude", "magnitude_unit", "source_url", "source_name", "revenue_usd_m", "cost_of_revenue_usd_m"} and row.get(k) not in (None, "") and _is_numeric_value(row.get(k))}
+                },
+                "record_provenance": row.get("record_provenance") or "",
+                "source_frequency": row.get("source_frequency") or "unknown",
+                "event_records": prior.get("event_records", []),
+                "decision_records": prior.get("decision_records", []),
+                "_event_keys": prior.get("_event_keys", set()),
+                "_decision_keys": prior.get("_decision_keys", set()),
+            }
+            event_name = (row.get("event_name") or "").strip()
+            event_category = (row.get("event_category") or "").strip()
+            event_date = d[:10]
+            if (
                     event_name and event_category
                     and "INTRADAY" not in event_category.upper()
                     and "HIGH-GRAIN TEMPORAL TICK" not in event_name.upper()
@@ -908,26 +1019,26 @@ def _load_company_monthly_data_locked(file_path: str) -> List[Dict[str, Any]]:
                             "date": event_date, "name": event_name, "category": event_category,
                             "event_id": row.get("event_id") or "", "source": row.get("record_provenance") or "",
                         })
-                decision_type = (row.get("decision_type") or "").strip()
-                decision_date = (row.get("effective_date") or row.get("announced_date") or "")[:10]
-                description = (row.get("short_description") or "").strip()
-                if decision_type and decision_date and not any(
-                    token in description.lower()
-                    for token in ("temporal tick", "market bar", "trading record", "regular strategic operating decision", "official rocast primary data record", "official company disclosure and market bar")
-                ):
-                    # Daily high-grain rows repeat monthly decision labels with
-                    # different bar dates. Retain each source description once
-                    # per month in the analysis series.
-                    decision_key = (decision_date[:7], decision_type, description)
-                    if decision_key not in monthly[ym]["_decision_keys"]:
-                        monthly[ym]["_decision_keys"].add(decision_key)
-                        monthly[ym]["decision_records"].append({
-                            "date": decision_date, "type": decision_type.replace("_", " ").title(),
-                            "description": description, "magnitude": row.get("magnitude") or "",
-                            "source": row.get("record_provenance") or "",
-                        })
-            except (TypeError, ValueError):
-                continue
+            decision_type = (row.get("decision_type") or "").strip()
+            decision_date = (row.get("effective_date") or row.get("announced_date") or "")[:10]
+            description = (row.get("short_description") or "").strip()
+            if decision_type and decision_date and not any(
+                token in description.lower()
+                for token in ("temporal tick", "market bar", "trading record", "regular strategic operating decision", "official rocast primary data record", "official company disclosure and market bar")
+            ):
+                # Daily high-grain rows repeat monthly decision labels with
+                # different bar dates. Retain each source description once
+                # per month in the analysis series.
+                decision_key = (decision_date[:7], decision_type, description)
+                if decision_key not in monthly[ym]["_decision_keys"]:
+                    monthly[ym]["_decision_keys"].add(decision_key)
+                    monthly[ym]["decision_records"].append({
+                        "date": decision_date, "type": decision_type.replace("_", " ").title(),
+                        "description": description, "magnitude": row.get("magnitude") or "",
+                        "source": row.get("record_provenance") or "",
+                    })
+        except (TypeError, ValueError):
+            continue
     pts = [monthly[k] for k in sorted(monthly.keys())]
     previous_sector = previous_home = previous_rate = None
     for point in pts:
@@ -1393,15 +1504,21 @@ def get_company_history_series(
     csv_path = company.get("csv_path") or find_csv_for_company(company_id, company.get("company_name", ""))
     if not csv_path or not os.path.isfile(csv_path):
         raise HTTPException(status_code=404, detail="No source series is available for this company.")
-    cache_key = (csv_path, metric)
+    
+    # Use cache keyed by csv_path only, not metric - allows instant metric switching
+    cache_key = csv_path
     with _DAILY_SERIES_CACHE_LOCK:
-        observations = DAILY_SERIES_CACHE.get(cache_key)
-        if observations is None:
-            observations = []
-            with open(csv_path, "r", encoding="utf-8", errors="ignore", newline="") as source:
-                reader = csv.DictReader(source)
-                fields = set(reader.fieldnames or [])
-                for row in reader:
+        cached_data = DAILY_SERIES_CACHE.get(cache_key)
+        if cached_data is None:
+            # Load raw CSV once from cache
+            raw_rows = _load_raw_csv_data(csv_path)
+            if not raw_rows:
+                cached_data = []
+            else:
+                # Extract all common metrics at once to enable fast switching
+                fields = set(raw_rows[0].keys()) if raw_rows else set()
+                observations = []
+                for row in raw_rows:
                     raw_date = row.get("timestamp") or row.get("datetime") or row.get("date") or ""
                     cleaned_date = _clean_upload_date(raw_date)
                     if not cleaned_date:
@@ -1410,38 +1527,52 @@ def get_company_history_series(
                         parsed_date = datetime.fromisoformat(cleaned_date.replace("Z", "+00:00"))
                     except ValueError:
                         continue
-                    if metric == "close":
-                        value = _clean_upload_number(row.get("adjusted_close") or row.get("close"))
-                    elif metric == "revenue_run_rate":
-                        revenue = _clean_upload_number(row.get("revenue_usd_m"))
-                        value = revenue / 12.0 if revenue is not None else None
-                    elif metric == "margin":
-                        revenue = _clean_upload_number(row.get("revenue_usd_m"))
-                        cogs = _clean_upload_number(row.get("cost_of_revenue_usd_m"))
-                        value = ((revenue - (cogs or 0.0)) / revenue * 100.0) if revenue else None
-                    elif metric.startswith("product_metrics."):
-                        value = _clean_upload_number(row.get(metric.split(".", 1)[1]))
-                    elif metric in fields:
-                        value = _clean_upload_number(row.get(metric))
-                    else:
-                        value = None
-                    if value is None:
+                    
+                    # Extract commonly used metrics
+                    close = _clean_upload_number(row.get("adjusted_close") or row.get("close"))
+                    revenue = _clean_upload_number(row.get("revenue_usd_m"))
+                    cogs = _clean_upload_number(row.get("cost_of_revenue_usd_m"))
+                    
+                    if close is None:
                         continue
+                    
                     has_time = ":" in raw_date or "T" in raw_date
                     date_string = parsed_date.isoformat(sep=" ", timespec="minutes") if has_time else parsed_date.date().isoformat()
+                    
+                    metric_values = {
+                        "close": close,
+                        "revenue_run_rate": revenue / 12.0 if revenue is not None else None,
+                        "margin": ((revenue - (cogs or 0.0)) / revenue * 100.0) if revenue else None,
+                    }
+                    
+                    # Add product metrics if present
+                    for pm_key in ("iphone_revenue_usd_m", "services_revenue_usd_m", "wearables_home_acc_usd_m", "mac_revenue_usd_m", "ipad_revenue_usd_m"):
+                        if pm_key in fields:
+                            metric_values[f"product_metrics.{pm_key}"] = _clean_upload_number(row.get(pm_key))
+                    
+                    # Add any other numeric fields as potential metrics
+                    for field in fields:
+                        if field not in {"date", "timestamp", "datetime", "company_id", "company_name", "ticker", "exchange", "main_country", "niche", "currency", "fiscal_year_end", "record_provenance", "source_frequency", "event_id", "event_name", "event_category", "event_date", "decision_type", "announced_date", "effective_date", "short_description", "magnitude", "magnitude_unit", "source_url", "source_name", "open", "high", "low", "volume", "adjusted_close", "close", "revenue_usd_m", "cost_of_revenue_usd_m"}:
+                            val = _clean_upload_number(row.get(field))
+                            if val is not None:
+                                metric_values[field] = val
+                    
                     observations.append({
                         "date": date_string,
                         "date_label": parsed_date.strftime("%b %d · %H:%M") if has_time else parsed_date.strftime("%b %d, %Y"),
-                        "value": value,
-                        "metric_values": {metric: value},
+                        "value": close,
+                        "metric_values": metric_values,
                     })
-            by_timestamp = {point["date"]: point for point in observations}
-            observations = [by_timestamp[key] for key in sorted(by_timestamp)]
-            DAILY_SERIES_CACHE[cache_key] = observations
-            # Each entry is one company's full intraday column, so cap the cache
-            # instead of letting every visited company x metric accumulate.
-            while len(DAILY_SERIES_CACHE) > 24:
-                DAILY_SERIES_CACHE.pop(next(iter(DAILY_SERIES_CACHE)))
+                
+                by_timestamp = {point["date"]: point for point in observations}
+                observations = [by_timestamp[key] for key in sorted(by_timestamp)]
+                cached_data = observations
+                DAILY_SERIES_CACHE[cache_key] = cached_data
+                # Cap cache to prevent memory bloat
+                while len(DAILY_SERIES_CACHE) > 50:
+                    DAILY_SERIES_CACHE.pop(next(iter(DAILY_SERIES_CACHE)))
+        
+        observations = cached_data
 
     if not observations:
         return {"company_id": company["company_id"], "metric": metric, "range": time_range, "frequency": "unavailable", "history": []}
@@ -1484,8 +1615,21 @@ def get_company_history_series(
     else:
         result = [as_monthly_point(point) for point in monthly_points]
         frequency = "monthly"
+    
+    # Filter result to return only the requested metric value
+    # This makes metric switching instant since all metrics are pre-computed
+    filtered_result = []
+    for point in result:
+        metric_value = point.get("metric_values", {}).get(metric)
+        if metric_value is not None:
+            filtered_result.append({
+                **point,
+                "value": metric_value,
+                "metric_values": {metric: metric_value}
+            })
+    
     return {"company_id": company["company_id"], "metric": metric, "range": time_range,
-            "frequency": frequency, "observations_available": len(observations), "history": result}
+            "frequency": frequency, "observations_available": len(observations), "history": filtered_result}
 
 @app.get("/api/scenario-catalog/{company_id}")
 def get_scenario_catalog(company_id: str):
@@ -1576,6 +1720,24 @@ def get_scenario_catalog(company_id: str):
                     month_returns[int(current["date"][5:7])].append(value)
             month_baseline = {month: (sum(values) / len(values) if values else 0.0) for month, values in month_returns.items()}
             by_month = {point["date"]: idx for idx, point in enumerate(points)}
+            # Per-company context for decision evidence: which months carry each
+            # label, and what an ordinary three-month move looks like for this
+            # company. Without the second number, every label in a file inherits
+            # that file's average return as its "effect", which is precisely why
+            # the evidence cards showed one impact range under many titles.
+            label_months: Dict[tuple, set] = {}
+            for point in points:
+                for decision in point.get("decision_records", []):
+                    label_months.setdefault((decision["type"], decision.get("description", "")), set()).add(point["date"])
+            event_label_months: Dict[tuple, set] = {}
+            for point in points:
+                for event in point.get("event_records", []):
+                    event_label_months.setdefault((event["name"], event["category"]), set()).add(point["date"])
+            forward_all = [
+                (points[idx + 3]["close"] / points[idx]["close"] - 1.0) * 100.0
+                for idx in range(len(points) - 3) if points[idx]["close"] > 0
+            ]
+            company_avg_3m = sum(forward_all) / len(forward_all) if forward_all else None
             for idx, point in enumerate(points):
                 month_num = int(point["date"][5:7])
                 for event in point.get("event_records", []):
@@ -1588,6 +1750,10 @@ def get_scenario_catalog(company_id: str):
                         "company_id": peer["company_id"], "date": point["date"],
                         "month_return_pct": returns.get(point["date"]),
                         "excess_return_pct": (returns[point["date"]] - month_baseline[month_num]) if point["date"] in returns else None,
+                        # Same test as decisions: an event label written on every
+                        # month of a file is not an event, and its measured excess
+                        # is the company's own average by construction.
+                        "coverage_pct": round(len(event_label_months.get(key, {point["date"]})) / max(1, len(points)) * 100.0, 1),
                     })
                 for decision in point.get("decision_records", []):
                     effective_month = decision.get("date", "")[:7]
@@ -1604,18 +1770,52 @@ def get_scenario_catalog(company_id: str):
                         continue
                     outcome = (end_close / start_close - 1.0) * 100.0
                     key = (decision["type"], decision.get("description", ""))
+                    coverage_pct = len(label_months.get(key, {effective_month})) / max(1, len(points)) * 100.0
                     decision_rows.setdefault(key, []).append({
                         "company_id": peer["company_id"], "date": effective_month,
-                        "followup_return_pct": outcome,
+                        "followup_return_pct": round(outcome, 3),
+                        # The only number that can distinguish two labels: this
+                        # month's outcome minus what this company normally does.
+                        "excess_vs_company_pct": round(outcome - company_avg_3m, 3) if company_avg_3m is not None else None,
+                        "coverage_pct": round(coverage_pct, 1),
                     })
 
-        def summarize_cases(rows: List[Dict[str, Any]], value_key: str) -> Dict[str, Any]:
-            values = [row[value_key] for row in rows if row.get(value_key) is not None]
+        # A decision field written across most months of a file describes standing
+        # state ("we are executing our growth plan"), not an event. Its measured
+        # outcome is indistinguishable from the company's own average, so those
+        # episodes are dropped rather than shown as if they were evidence.
+        DEGENERATE_COVERAGE_PCT = 60.0
+
+        def summarize_cases(rows: List[Dict[str, Any]], value_key: str, excess_key: Optional[str] = None) -> Dict[str, Any]:
+            episodes: Dict[Any, Dict[str, Any]] = {}
+            for row in rows:
+                episodes.setdefault((row.get("company_id"), row.get("date")), row)
+            # One dated episode counts once, not once per intraday row.
+            all_episodes = list(episodes.values())
+            usable = [row for row in all_episodes if float(row.get("coverage_pct") or 0.0) <= DEGENERATE_COVERAGE_PCT]
+            source_key = value_key
+            if excess_key and any(row.get(excess_key) is not None for row in usable):
+                source_key = excess_key
+            values = [row[source_key] for row in usable if row.get(source_key) is not None]
+            raw = [row[value_key] for row in usable if row.get(value_key) is not None]
+            companies = sorted({row["company_id"] for row in usable}) or sorted({row["company_id"] for row in all_episodes})
             return {
-                "observations": len(values),
-                "companies": sorted({row["company_id"] for row in rows}),
+                "observations": len(usable),
+                "row_observations": len(values),
+                "companies": companies,
                 "estimated_effect_pct": round(sum(values) / len(values), 3) if len(values) >= 2 else None,
-                "cases": rows[-8:],
+                "raw_followup_mean_pct": round(sum(raw) / len(raw), 3) if len(raw) >= 2 else None,
+                "standing_state_episodes_dropped": len(all_episodes) - len(usable),
+                "max_coverage_pct": max((float(row.get("coverage_pct") or 0.0) for row in all_episodes), default=None),
+                # True when this label is recorded on almost every month of every
+                # file that carries it: selectable as an assumption, but the model
+                # measures nothing from it.
+                "standing_state": bool(all_episodes) and not usable or max((float(row.get("coverage_pct") or 0.0) for row in all_episodes), default=0.0) > DEGENERATE_COVERAGE_PCT,
+                "effect_basis": (
+                    "excess over the same company's own average three-month move"
+                    if source_key != value_key else "excess return against that calendar month's own baseline"
+                ),
+                "cases": usable[-8:],
             }
 
         SCENARIO_CATALOG_CACHE = {
@@ -1624,11 +1824,15 @@ def get_scenario_catalog(company_id: str):
                 for (name, category), rows in sorted(event_rows.items()) if len({r["company_id"] + r["date"] for r in rows}) >= 2
             ],
             "decisions": [
-                {"id": f"decision:{kind}|{description}", "label": f"{kind.replace('_', ' ').title()}: {description}", "description": description, **summarize_cases(rows, "followup_return_pct")}
+                {"id": f"decision:{kind}|{description}", "label": f"{kind.replace('_', ' ').title()}: {description}", "description": description, **summarize_cases(rows, "followup_return_pct", "excess_vs_company_pct")}
                 for (kind, description), rows in sorted(decision_rows.items()) if len({r["company_id"] + r["date"] for r in rows}) >= 2
             ],
             "company_context": company_context,
         }
+        # An option only earns a place if at least two dated episodes survive the
+        # standing-state filter. Labels recorded in every month measure nothing,
+        # so they are dropped here rather than shown as repeatable conditions.
+        SCENARIO_CATALOG_CACHE["decisions"] = [item for item in SCENARIO_CATALOG_CACHE["decisions"] if item["observations"] >= 2]
         try:
             with open(catalog_cache_path, "w", encoding="utf-8") as cache_file:
                 json.dump({"signature": catalog_signature, "catalog": SCENARIO_CATALOG_CACHE}, cache_file, separators=(",", ":"))
@@ -1641,11 +1845,25 @@ def get_scenario_catalog(company_id: str):
         "niche": company.get("niche", ""),
         "country": company.get("main_country", ""),
     })
+    def _country_key(value: Any) -> str:
+        # Country labels are typed per dataset, so the same country reaches the
+        # registry as "USA", "United States" or "U.S.". Comparing them exactly
+        # split one cohort into fragments and left companies such as Apple with
+        # no peer evidence at all, which read as a broken panel.
+        cleaned = "".join(char for char in str(value or "").lower() if char.isalnum())
+        return {
+            "usa": "unitedstates", "us": "unitedstates", "america": "unitedstates",
+            "unitedstates": "unitedstates", "unitedstatesofamerica": "unitedstates",
+            "india": "india", "republicofindia": "india", "bharat": "india",
+            "kr": "southkorea", "korea": "southkorea", "southkorea": "southkorea",
+            "republicofkorea": "southkorea",
+        }.get(cleaned, cleaned)
+
     related_ids = {
         peer_id for peer_id, peer in SCENARIO_CATALOG_CACHE["company_context"].items()
         if peer_id != company_id and (
             (context.get("niche") and peer.get("niche", "").lower() == context["niche"].lower())
-            or (context.get("country") and peer.get("country") == context["country"])
+            or (context.get("country") and _country_key(peer.get("country")) == _country_key(context.get("country")))
         )
     }
     history = load_company_monthly_data(company.get("csv_path") or find_csv_for_company(company_id, company.get("company_name", "")))
@@ -1664,6 +1882,22 @@ def get_scenario_catalog(company_id: str):
     month_means = {month: (sum(values) / len(values) if values else overall_mean) for month, values in month_returns.items()}
     own_event_rows: Dict[tuple, List[Dict[str, Any]]] = {}
     own_decision_rows: Dict[tuple, List[Dict[str, Any]]] = {}
+    # Same treatment as the shared catalog: how many months carry each label, and
+    # what this company's ordinary three-month move is, so a label that never
+    # switches off cannot masquerade as an event with an effect.
+    own_label_months: Dict[tuple, set] = {}
+    for point in history:
+        for decision in point.get("decision_records", []):
+            own_label_months.setdefault((decision.get("type", "Unspecified"), decision.get("description", "")), set()).add(point["date"])
+    own_event_label_months: Dict[tuple, set] = {}
+    for point in history:
+        for event in point.get("event_records", []):
+            own_event_label_months.setdefault((event.get("name", ""), event.get("category", "")), set()).add(point["date"])
+    own_forward = [
+        (history[idx + 3]["close"] / point["close"] - 1.0) * 100.0
+        for idx, point in enumerate(history[:-3]) if point.get("close", 0) > 0
+    ]
+    own_avg_3m = sum(own_forward) / len(own_forward) if own_forward else None
     for index, point in enumerate(history):
         month_number = int(point["date"][5:7])
         for event in point.get("event_records", []):
@@ -1673,23 +1907,46 @@ def get_scenario_catalog(company_id: str):
                     "company_id": company_id, "date": point["date"],
                     "month_return_pct": current_returns[index],
                     "excess_return_pct": current_returns[index] - month_means[month_number],
+                    "coverage_pct": round(len(own_event_label_months.get(key, {point["date"]})) / max(1, len(history)) * 100.0, 1),
                 })
         for decision in point.get("decision_records", []):
             key = (decision.get("type", "Unspecified"), decision.get("description", ""))
             outcome = None
             if index + 3 < len(history) and point.get("close", 0) > 0:
                 outcome = (history[index + 3]["close"] / point["close"] - 1.0) * 100.0
+            coverage = len(own_label_months.get(key, set())) / max(1, len(history)) * 100.0
             own_decision_rows.setdefault(key, []).append({
                 "company_id": company_id, "date": str(decision.get("date", point["date"]))[:7],
-                "followup_return_pct": outcome,
+                "followup_return_pct": round(outcome, 3) if outcome is not None else None,
+                "excess_vs_company_pct": round(outcome - own_avg_3m, 3) if outcome is not None and own_avg_3m is not None else None,
+                "coverage_pct": round(coverage, 1),
             })
 
-    def summarize_local(rows, value_key):
-        values = [row[value_key] for row in rows if row.get(value_key) is not None]
+    LOCAL_DEGENERATE_COVERAGE_PCT = 60.0
+
+    def summarize_local(rows, value_key, excess_key=None):
+        episodes: Dict[Any, Dict[str, Any]] = {}
+        for row in rows:
+            episodes.setdefault(row.get("date"), row)
+        all_episodes = list(episodes.values())
+        usable = [row for row in all_episodes if float(row.get("coverage_pct") or 0.0) <= LOCAL_DEGENERATE_COVERAGE_PCT]
+        source_key = value_key
+        if excess_key and any(row.get(excess_key) is not None for row in usable):
+            source_key = excess_key
+        values = [row[source_key] for row in usable if row.get(source_key) is not None]
+        raw = [row[value_key] for row in usable if row.get(value_key) is not None]
         return {
-            "observations": len(values), "companies": [company_id],
+            "observations": len(usable), "row_observations": len(values), "companies": [company_id],
             "estimated_effect_pct": round(sum(values) / len(values), 3) if len(values) >= 2 else None,
-            "cases": rows[-8:],
+            "raw_followup_mean_pct": round(sum(raw) / len(raw), 3) if len(raw) >= 2 else None,
+            "standing_state_episodes_dropped": len(all_episodes) - len(usable),
+            "max_coverage_pct": round(max((float(row.get("coverage_pct") or 0.0) for row in all_episodes), default=0.0), 1),
+            "standing_state": bool(all_episodes) and not usable or max((float(row.get("coverage_pct") or 0.0) for row in all_episodes), default=0.0) > LOCAL_DEGENERATE_COVERAGE_PCT,
+            "effect_basis": (
+                "excess over this company's own average three-month move"
+                if source_key != value_key else "excess return against that calendar month's own baseline"
+            ),
+            "cases": usable[-8:],
         }
 
     local_events = [
@@ -1700,9 +1957,10 @@ def get_scenario_catalog(company_id: str):
     cached_event_labels = {item.get("label") for item in SCENARIO_CATALOG_CACHE.get("events", [])}
     local_events = [item for item in local_events if item["id"] not in cached_event_ids and item["label"] not in cached_event_labels]
     local_decisions = [
-        {"id": f"company-decision:{company_id}:{kind}|{description}", "label": f"{str(kind).replace('_', ' ').title()}: {description}", "description": description, **summarize_local(rows, "followup_return_pct")}
+        {"id": f"company-decision:{company_id}:{kind}|{description}", "label": f"{str(kind).replace('_', ' ').title()}: {description}", "description": description, **summarize_local(rows, "followup_return_pct", "excess_vs_company_pct")}
         for (kind, description), rows in own_decision_rows.items()
     ]
+    local_decisions = [item for item in local_decisions if item["observations"] >= 2]
     cached_decision_labels = {item.get("label") for item in SCENARIO_CATALOG_CACHE.get("decisions", []) if company_id in item.get("companies", [])}
     local_decisions = [item for item in local_decisions if item["label"] not in cached_decision_labels]
     calendar_options = []
@@ -2151,6 +2409,342 @@ def get_past_analogs(company_id: str, item: str = "pandemic"):
         ]
     }
 
+def generate_decision_context(decision_type: str, avg_outcome: float, sample_count: int, company_name: str) -> Dict[str, Any]:
+    """Generate context-specific description and implementation guidance based on decision type and outcomes."""
+    
+    # Extract key decision type keywords for context
+    decision_lower = decision_type.lower()
+    
+    # Determine decision category with more sophisticated matching
+    if any(word in decision_lower for word in ["acquisition", "merger", "buy", "takeover", "acquire"]):
+        category = "M&A"
+        positive_guidance = {
+            "good_practices": [
+                "Conduct thorough due diligence on target financial health and market position",
+                "Ensure cultural fit and integration planning before deal completion",
+                "Maintain sufficient cash reserves post-acquisition for operational stability",
+                "Focus on strategic synergies rather than growth for growth's sake"
+            ],
+            "bad_practices": [
+                "Overpaying based on optimistic projections without stress-testing",
+                "Neglecting integration challenges and talent retention",
+                "Diluting core business focus with unrelated acquisitions",
+                "Ignoring regulatory and antitrust considerations in current environment"
+            ]
+        }
+        negative_guidance = {
+            "good_practices": [
+                "Pause acquisition activity and focus on organic growth and optimization",
+                "Review past acquisition failures for learning opportunities",
+                "Strengthen core competencies before considering expansion",
+                "Build strategic partnerships instead of full acquisitions"
+            ],
+            "bad_practices": [
+                "Continuing aggressive acquisition strategy despite poor historical outcomes",
+                "Ignoring market signals that suggest consolidation fatigue",
+                "Over-leveraging balance sheet for speculative deals"
+            ]
+        }
+    elif any(word in decision_lower for word in ["launch", "product", "release", "introduce", "feature"]):
+        category = "Product Launch"
+        positive_guidance = {
+            "good_practices": [
+                "Validate market demand through customer research and pilot testing",
+                "Time launches to align with favorable market conditions and seasonality",
+                "Ensure supply chain readiness and distribution channel preparation",
+                "Coordinate marketing spend with product availability"
+            ],
+            "bad_practices": [
+                "Launching without adequate inventory or support infrastructure",
+                "Ignoring competitive product timing and market saturation",
+                "Over-promising features that cannot be delivered reliably",
+                "Neglecting post-launch customer feedback and iteration"
+            ]
+        }
+        negative_guidance = {
+            "good_practices": [
+                "Conduct post-mortem on failed launches to identify root causes",
+                "Focus on product improvement and customer satisfaction before new launches",
+                "Test pricing strategies and market positioning carefully",
+                "Build robust product-market fit before scaling"
+            ],
+            "bad_practices": [
+                "Accelerating launch schedules without addressing underlying quality issues",
+                "Blaming market conditions instead of product-market fit problems",
+                "Continuing to invest in products with declining adoption"
+            ]
+        }
+    elif any(word in decision_lower for word in ["cost", "cut", "reduction", "layoff", "downsize", "efficiency"]):
+        category = "Cost Optimization"
+        positive_guidance = {
+            "good_practices": [
+                "Target non-essential overhead and administrative inefficiencies",
+                "Invest cost savings into growth initiatives and innovation",
+                "Communicate transparently with stakeholders about restructuring rationale",
+                "Maintain critical talent and core capabilities during cuts"
+            ],
+            "bad_practices": [
+                "Cutting R&D and innovation capacity that drives future growth",
+                "Reducing customer service quality that affects retention",
+                "Implementing across-the-board cuts without strategic prioritization",
+                "Damaging employee morale without clear turnaround plan"
+            ]
+        }
+        negative_guidance = {
+            "good_practices": [
+                "Focus on revenue growth and market expansion instead of cost-cutting",
+                "Optimize operations through process improvement rather than headcount reduction",
+                "Invest in efficiency tools and automation strategically",
+                "Review all expenses for strategic value before cutting"
+            ],
+            "bad_practices": [
+                "Continuing aggressive cost-cutting that damages long-term competitiveness",
+                "Reducing critical business functions for short-term margin improvement",
+                "Ignoring the human capital impact of repeated layoffs"
+            ]
+        }
+    elif any(word in decision_lower for word in ["investment", "capex", "expand", "build", "infrastructure", "construction"]):
+        category = "Capital Investment"
+        positive_guidance = {
+            "good_practices": [
+                "Evaluate ROI with realistic assumptions and downside scenarios",
+                "Phase investments to reduce risk and allow course correction",
+                "Align investments with long-term strategic positioning",
+                "Maintain financial flexibility for unexpected opportunities"
+            ],
+            "bad_practices": [
+                "Over-investing during peak market cycles without stress-testing",
+                "Committing to large projects without clear exit strategies",
+                "Ignoring alternative uses of capital with higher returns",
+                "Underestimating implementation timelines and costs"
+            ]
+        }
+        negative_guidance = {
+            "good_practices": [
+                "Review investment thesis and assumptions with current market reality",
+                "Consider smaller, iterative investments instead of large commitments",
+                "Focus on high-ROI, short-payback projects first",
+                "Preserve capital for strategic opportunities in uncertain environment"
+            ],
+            "bad_practices": [
+                "Doubling down on underperforming investments due to sunk cost fallacy",
+                "Ignoring changing market conditions that invalidate original assumptions",
+                "Continuing capital-intensive projects without clear success metrics"
+            ]
+        }
+    elif any(word in decision_lower for word in ["dividend", "buyback", "return", "shareholder", "payout"]):
+        category = "Capital Return"
+        positive_guidance = {
+            "good_practices": [
+                "Ensure sustainable payout ratio from recurring cash flows",
+                "Maintain investment-grade balance sheet alongside returns",
+                "Communicate clear policy to manage market expectations",
+                "Balance shareholder returns with growth investment needs"
+            ],
+            "bad_practices": [
+                "Increasing dividends when free cash flow is declining",
+                "Using debt to fund buybacks at expensive valuations",
+                "Returning capital needed for strategic investments",
+                "Cutting dividends unexpectedly after establishing expectations"
+            ]
+        }
+        negative_guidance = {
+            "good_practices": [
+                "Preserve capital for reinvestment in growth opportunities",
+                "Strengthen balance sheet before resuming shareholder returns",
+                "Consider special one-time returns instead of recurring commitments",
+                "Focus on building intrinsic value over short-term shareholder returns"
+            ],
+            "bad_practices": [
+                "Initiating or increasing dividends during financial stress",
+                "Prioritizing buybacks over critical business investments",
+                "Creating expectations that cannot be sustained"
+            ]
+        }
+    elif any(word in decision_lower for word in ["pricing", "price", "monetization", "revenue model"]):
+        category = "Pricing Strategy"
+        positive_guidance = {
+            "good_practices": [
+                "Test pricing elasticity with A/B experiments before broad rollout",
+                "Consider competitive positioning and value perception",
+                "Segment customers for differentiated pricing where appropriate",
+                "Monitor churn and customer satisfaction after price changes"
+            ],
+            "bad_practices": [
+                "Implementing blanket price increases without market testing",
+                "Underpricing premium products and leaving revenue on the table",
+                "Overpricing relative to value proposition and competitors",
+                "Frequent price changes that confuse customers and damage trust"
+            ]
+        }
+        negative_guidance = {
+            "good_practices": [
+                "Review pricing strategy alignment with market conditions",
+                "Focus on value delivery to justify pricing",
+                "Consider bundling or tiered pricing for better alignment",
+                "Test discount strategies carefully to avoid brand damage"
+            ],
+            "bad_practices": [
+                "Engaging in price wars that erode margins industry-wide",
+                "Using discounts as a crutch for weak product-market fit",
+                "Ignoring customer lifetime value in pricing decisions"
+            ]
+        }
+    elif any(word in decision_lower for word in ["training", "talent", "hiring", "recruitment", "personnel"]):
+        category = "Talent & Training"
+        positive_guidance = {
+            "good_practices": [
+                "Align training programs with strategic business objectives",
+                "Measure training ROI through performance metrics and retention",
+                "Invest in continuous learning and upskilling programs",
+                "Balance internal development with strategic external hiring"
+            ],
+            "bad_practices": [
+                "Training without clear business outcomes or measurement",
+                "Over-investing in training that doesn't address skill gaps",
+                "Neglecting on-the-job learning and mentorship programs",
+                "Hiring for credentials over demonstrated capability"
+            ]
+        }
+        negative_guidance = {
+            "good_practices": [
+                "Review training effectiveness and alignment with business needs",
+                "Focus on high-impact skills that drive competitive advantage",
+                "Consider just-in-time learning for specific initiatives",
+                "Build strong onboarding and knowledge transfer processes"
+            ],
+            "bad_practices": [
+                "Continuing ineffective training programs without improvement",
+                "Blaming talent instead of processes or strategy",
+                "Underinvesting in critical skill development"
+            ]
+        }
+    elif any(word in decision_lower for word in ["safety", "guardrail", "compliance", "risk", "security"]):
+        category = "Risk & Safety"
+        positive_guidance = {
+            "good_practices": [
+                "Implement safety measures proportionate to risk level",
+                "Balance risk mitigation with operational efficiency",
+                "Document safety protocols and ensure team understanding",
+                "Monitor safety metrics and iterate on protocols"
+            ],
+            "bad_practices": [
+                "Over-engineering safety controls that paralyze operations",
+                "Treating safety as checkbox compliance rather than culture",
+                "Ignoring near-miss incidents and warning signs",
+                "Inconsistent application of safety standards"
+            ]
+        }
+        negative_guidance = {
+            "good_practices": [
+                "Review safety incidents for root cause analysis",
+                "Engage frontline teams in safety protocol design",
+                "Focus on systemic risks rather than individual incidents",
+                "Build safety into product and process design from the start"
+            ],
+            "bad_practices": [
+                "Blaming individuals for systemic safety failures",
+                "Reducing safety measures to cut costs",
+                "Ignoring regulatory requirements and industry standards"
+            ]
+        }
+    elif any(word in decision_lower for word in ["partnership", "alliance", "collaboration", "joint venture"]):
+        category = "Partnerships"
+        positive_guidance = {
+            "good_practices": [
+                "Establish clear mutual objectives and success metrics",
+                "Define governance structures and decision-making processes",
+                "Ensure complementary capabilities and strategic alignment",
+                "Plan for exit scenarios and dispute resolution"
+            ],
+            "bad_practices": [
+                "Entering partnerships without clear strategic rationale",
+                "Unclear roles and responsibilities leading to conflicts",
+                "Ignoring cultural fit and operational compatibility",
+                "Over-reliance on partners for critical capabilities"
+            ]
+        }
+        negative_guidance = {
+            "good_practices": [
+                "Review partnership performance against original objectives",
+                "Renegotiate terms that no longer serve strategic interests",
+                "Build internal capabilities to reduce dependency",
+                "Consider ending partnerships that create strategic risk"
+            ],
+            "bad_practices": [
+                "Staying in failing partnerships due to sunk costs",
+                "Allowing partners to become gatekeepers to key markets",
+                "Ignoring misalignment in partner incentives"
+            ]
+        }
+    else:
+        category = "Strategic Decision"
+        positive_guidance = {
+            "good_practices": [
+                "Base decisions on data-driven analysis and scenario planning",
+                "Consider multiple time horizons and stakeholder impacts",
+                "Build in flexibility to adapt to changing conditions",
+                "Establish clear success metrics and review processes"
+            ],
+            "bad_practices": [
+                "Making decisions based on anecdotal evidence or bias",
+                "Ignoring downside risks and worst-case scenarios",
+                "Over-committing to single course of action without alternatives",
+                "Failing to align execution with strategic intent"
+            ]
+        }
+        negative_guidance = {
+            "good_practices": [
+                "Conduct thorough analysis of past decision outcomes",
+                "Seek diverse perspectives and challenge assumptions",
+                "Test decisions with small-scale pilots before full commitment",
+                "Build stronger governance and decision review processes"
+            ],
+            "bad_practices": [
+                "Repeating similar decisions without addressing root causes of past failures",
+                "Rushing decisions without adequate analysis or preparation",
+                "Ignoring feedback and warning signals from the market"
+            ]
+        }
+    
+    # Select guidance based on outcome
+    guidance = positive_guidance if avg_outcome > 0 else negative_guidance
+    
+    # Generate context-specific description
+    outcome_description = (
+        f"{decision_type} has shown a {avg_outcome:+.2f}% average three-month market-price change "
+        f"across {sample_count} historical episodes for {company_name}. "
+        f"This {'positive' if avg_outcome > 0 else 'negative'} association suggests that "
+        f"{'market participants have historically rewarded' if avg_outcome > 0 else 'market participants have historically penalized'} "
+        f"this type of {category} decision, though correlation does not imply causation."
+    )
+    
+    # Generate comprehensive implementation guidance
+    implementation = (
+        f"For {category} decisions, consider the current economic environment, competitive landscape, "
+        f"and {company_name}'s specific position and strengths. "
+        f"Review the following best practices and pitfalls based on historical outcomes."
+    )
+    
+    implementation_steps = [
+        f"Analyze {company_name}'s current market position, financial health, and competitive advantages",
+        f"Evaluate macroeconomic conditions and sector-specific current affairs affecting {category}",
+        f"Review the {sample_count} historical episodes in the evidence list for context and comparability",
+        f"Assess whether current conditions are similar to or different from past successful periods",
+        f"Model the proposed action's impact on key financial metrics and market expectations",
+        f"Assign clear ownership, success metrics, and review cadence for implementation"
+    ]
+    
+    return {
+        "category": category,
+        "description": outcome_description,
+        "implementation": implementation,
+        "implementation_steps": implementation_steps,
+        "good_practices": guidance["good_practices"],
+        "bad_practices": guidance["bad_practices"]
+    }
+
+
 @app.post("/api/company/{company_id}/recommendations")
 def get_recommendations(company_id: str, req: RecommendationsRequest = Body(...)):
     """Rank decision types by their observed, non-causal post-decision outcomes."""
@@ -2158,6 +2752,35 @@ def get_recommendations(company_id: str, req: RecommendationsRequest = Body(...)
     points = load_company_monthly_data(c.get("csv_path") or find_csv_for_company(c["company_id"], c.get("company_name", "")))
     decision_groups: Dict[str, List[Dict[str, Any]]] = {}
     point_by_month = {point["date"]: point for point in points}
+    # What an ordinary three-month move looks like for this company, and how many
+    # months carry each decision label. Both are needed because these files write
+    # the decision fields on every row: measured against nothing, every label in
+    # one file returns the same average, which is the repeated content the panel
+    # showed under different titles. Effects below are excess over this baseline,
+    # and labels present in most months are reported as standing state, not
+    # evidence.
+    forward_all = [
+        (points[idx + 3]["close"] / point["close"] - 1.0) * 100.0
+        for idx, point in enumerate(points[:-3]) if point.get("close", 0) > 0
+    ]
+    company_avg_3m = sum(forward_all) / len(forward_all) if forward_all else None
+    label_months: Dict[str, set] = {}
+    for point in points:
+        for decision in point.get("decision_records", []):
+            label_months.setdefault(decision.get("type", "Unspecified"), set()).add(point["date"])
+    STANDING_STATE_COVERAGE_PCT = 60.0
+    # The company's own current position, so that every card can say what it
+    # means now rather than repeating a template. Failures here are tolerated:
+    # a recommendation list is more useful with partial context than not at all.
+    try:
+        position_profile = get_company_profile(company_id)
+    except Exception:
+        position_profile = {}
+    try:
+        position_strengths = get_company_strengths(company_id)
+    except Exception:
+        position_strengths = {}
+    position = detect_states(position_profile, position_strengths, None, None)
     for idx, point in enumerate(points):
         if idx + 3 >= len(points):
             continue
@@ -2182,16 +2805,27 @@ def get_recommendations(company_id: str, req: RecommendationsRequest = Body(...)
                 "date": effective_month,
                 "description": description,
                 "outcome_pct": outcome,
+                "excess_pct": (outcome - company_avg_3m) if company_avg_3m is not None else None,
             })
 
     recommendations = []
+    standing_state_labels = []
     for decision_type, outcomes in decision_groups.items():
         # Count unique episodes, not repeated intraday rows.
         unique = {item["date"]: item for item in outcomes}
         sample = list(unique.values())
+        coverage_pct = len(label_months.get(decision_type, set())) / max(1, len(points)) * 100.0
+        if coverage_pct > STANDING_STATE_COVERAGE_PCT:
+            standing_state_labels.append({
+                "decision": decision_type,
+                "coverage_pct": round(coverage_pct, 1),
+                "months_recorded": len(label_months.get(decision_type, set())),
+                "months_available": len(points),
+            })
+            continue
         if len(sample) < 3:
             continue
-        vals = [item["outcome_pct"] for item in sample]
+        vals = [item["excess_pct"] if item["excess_pct"] is not None else item["outcome_pct"] for item in sample]
         avg = sum(vals) / len(vals)
         variance = sum((value - avg) ** 2 for value in vals) / max(1, len(vals) - 1)
         se = math.sqrt(variance / len(vals))
@@ -2204,6 +2838,41 @@ def get_recommendations(company_id: str, req: RecommendationsRequest = Body(...)
             tier, color = "Historically negative association", "#EF4444"
         else:
             tier, color = "Uncertain: more evidence needed", "#9CA3AF"
+        
+        # Generate context-specific content
+        context = generate_decision_context(decision_type, avg, len(sample), c.get("company_name", "this company"))
+        
+        # Every card has to carry numbers its sibling cards do not have: months
+        # present in the file, episode spread, and the share of episodes that beat
+        # this company's own average.
+        recorded_months = len(label_months.get(decision_type, set()))
+        above_share = round(sum(1 for value in vals if value > 0) / len(vals) * 100.0, 1)
+        ordinary_3m = company_avg_3m if company_avg_3m is not None else 0.0
+        card_description = (
+            f"{decision_type} is written on {recorded_months} of the {len(points)} months in this file "
+            f"({round(coverage_pct, 1)}% of it), and {len(sample)} of those months still have three observed months "
+            f"after them to measure. Those averaged {avg:+.2f}% against this company's own ordinary "
+            f"{ordinary_3m:+.2f}% three-month move, spreading from {min(vals):+.2f}% to {max(vals):+.2f}%, with "
+            f"{above_share}% of the episodes landing above the company's own average. That above-average share is the "
+            f"number that separates this label from the others in the same file - the raw level would not, because "
+            f"every label in a file like this also contains the company's own average move. Association only: the file "
+            f"does not record what would have happened without the decision."
+        )
+        context_parts = [f"phase {position.get('phase') or 'not established'}"]
+        if position.get("projected_change_pct") is not None:
+            context_parts.append(f"projected {position['projected_change_pct']:+.2f}% over the forecast window")
+        if position.get("gross_margin_pct") is not None:
+            context_parts.append(f"gross margin {position['gross_margin_pct']}%")
+        if position.get("peak_window"):
+            context_parts.append(f"strongest projected month {position['peak_window']}")
+        if position.get("crash_window"):
+            context_parts.append(f"modelled downside window {position['crash_window']} at {position.get('crash_prob_pct', 0)}%")
+        card_environment = (
+            "Read this against where the organisation stands now: " + ", ".join(context_parts) + ". A decision "
+            "that paid off under earlier conditions is a hypothesis in these ones, not a precedent - re-test it at "
+            "small scale and fix the review date before scaling it."
+        )
+
         recommendations.append({
             "decision": decision_type,
             "tier": tier,
@@ -2211,17 +2880,20 @@ def get_recommendations(company_id: str, req: RecommendationsRequest = Body(...)
             "icon": "evidence",
             "estimated_growth_range": f"{low:+.2f}% to {high:+.2f}%",
             "with_decision_growth": round(avg, 2),
-            "without_decision_growth": None,
+            "raw_followup_mean_pct": round(sum(item["outcome_pct"] for item in sample) / len(sample), 2),
+            "company_ordinary_3m_pct": round(company_avg_3m, 2) if company_avg_3m is not None else None,
+            "effect_meaning": "excess three-month market-price change against this company's own ordinary three-month move",
+            "without_decision_growth": round(company_avg_3m, 2) if company_avg_3m is not None else None,
             "matched_cases_count": len(sample),
-            "evidence_list": [f"{item['date']}: {item['outcome_pct']:+.2f}% company market-price change over the following three observed months." for item in sample[-5:]],
-            "description": f"Average observed three-month market-price change after this decision label: {avg:+.2f}% across {len(sample)} dated episodes. This association does not establish that the decision caused the return.",
-            "implementation": "Use this as a screening signal, not an instruction. Validate the underlying decision and comparable period, set a company KPI baseline, model the proposed action against the baseline forecast, then review it with an owner and downside trigger before execution.",
-            "implementation_steps": [
-                "Validate the decision description, date, source, and magnitude.",
-                "Set a company-specific baseline KPI and forecast horizon.",
-                "Compare the proposed action with the baseline and its uncertainty range.",
-                "Assign an owner, review cadence, and measurable downside trigger before execution.",
-            ],
+            "months_coverage_pct": round(coverage_pct, 1),
+            "above_average_share": above_share,
+            "evidence_list": [f"{item['date']}: {item['outcome_pct']:+.2f}% three-month market-price change, {(item['excess_pct'] if item['excess_pct'] is not None else 0.0):+.2f}% against this company's own average." for item in sample[-5:]],
+            "description": card_description,
+            "environment_context": card_environment,
+            "implementation": context["implementation"],
+            "implementation_steps": context["implementation_steps"],
+            "good_practices": context["good_practices"],
+            "bad_practices": context["bad_practices"],
             "confidence_interval_95_pct": [round(avg - 1.96 * se, 2), round(avg + 1.96 * se, 2)],
         })
     recommendations.sort(key=lambda item: item["with_decision_growth"], reverse=True)
@@ -2237,6 +2909,10 @@ def get_recommendations(company_id: str, req: RecommendationsRequest = Body(...)
                 continue
             low = min(outcomes) if outcomes else effect
             high = max(outcomes) if outcomes else effect
+            
+            # Generate context-specific content for peer decisions
+            peer_context = generate_decision_context(option['label'], effect, option.get('observations', len(outcomes)), c.get("company_name", "this company"))
+            
             recommendations.append({
                 "decision": f"Peer action: {option['label']}",
                 "tier": "Peer association; validate locally",
@@ -2247,28 +2923,126 @@ def get_recommendations(company_id: str, req: RecommendationsRequest = Body(...)
                 "without_decision_growth": None,
                 "matched_cases_count": option.get("observations", len(outcomes)),
                 "evidence_list": [f"{case['company_id']} · {case['date']}: {case['followup_return_pct']:+.2f}% three-month market-price change." for case in cases if case.get("followup_return_pct") is not None],
-                "description": f"Across supplied same-niche or same-country peer candidates, this decision label was followed by an average three-month market-price change of {effect:+.2f}% in {option.get('observations', 0)} episodes. Peer selection does not verify direct competition, and association does not establish causality.",
-                "implementation": "Treat this as a peer case to investigate. Confirm that the company, action size, market conditions, and outcomes are comparable before considering the action.",
+                "description": f"Peer decision '{option['label']}' observed across supplied same-niche or same-country peer candidates. {peer_context['description']}",
+                "implementation": f"Peer evidence requires careful validation. {peer_context['implementation']} Cross-reference peer company contexts with {c.get('company_name', 'this company')}'s current situation.",
                 "implementation_steps": [
-                    "Inspect the source companies, dates, and decision descriptions in the evidence list.",
-                    "Define the target company KPI and the action magnitude being considered.",
-                    "Model the proposed action against this company's baseline forecast and uncertainty range.",
-                    "Assign an accountable owner, review date, and downside stop condition before proceeding.",
+                    f"Inspect the source companies, dates, and decision descriptions in the evidence list for comparability with {c.get('company_name', 'this company')}.",
+                    f"Analyze whether peer companies' market position, scale, and environment are similar to {c.get('company_name', 'this company')}.",
+                    f"Define the target company KPI and the action magnitude being considered, adjusted for {c.get('company_name', 'this company')}'s specific context.",
+                    f"Model the proposed action against this company's baseline forecast and uncertainty range.",
+                    f"Assign an accountable owner, review date, and downside stop condition before proceeding.",
                 ],
+                "good_practices": peer_context["good_practices"],
+                "bad_practices": peer_context["bad_practices"],
                 "confidence_interval_95_pct": None,
                 "evidence_scope": "peer companies in supplied files",
             })
         recommendations.sort(key=lambda item: item["with_decision_growth"], reverse=True)
 
+    # The do-nothing path first: the plan below ranks moves against it, so the
+    # forecast has to exist before the plan is assembled.
     model = forecast_monthly_close(points, horizon=12, scenario_terms=[key for key, value in req.toggles.items() if value is True])
     future = model.get("forecast", [])
     last_close = points[-1]["close"] if points else 0
     expected_change = (future[-1]["close"] / last_close - 1.0) * 100.0 if future and last_close else None
+    if expected_change is not None:
+        position["projected_change_pct"] = round(expected_change, 2)
+        position["declining"] = expected_change < 0
+        position["growing"] = expected_change > 5
+
+    # Unnamed peer cohort. Everything that could not be measured from supplied
+    # files is expressed as general sector strategy - no competitor is named, no
+    # web scraping is attempted, and nothing is labelled as evidence. It is a list
+    # of hypotheses to test, returned for every company including those with rich
+    # own history, because "what worked here" and "what the sector usually tries"
+    # are different questions and a business reader needs both on the table.
+    sector_text = " ".join(filter(None, [
+        c.get("niche", ""), c.get("company_name", ""), c.get("description", ""),
+    ])) or c.get("company_name", "")
+    playbook = build_playbook(sector_text, position)
+
+    # Merge the two kinds of advice into one ordered plan, with the basis stated
+    # on every line so nobody can mistake a prior for a result.
+    measured = [item for item in recommendations if item.get("icon") in {"evidence", "peer-evidence"}]
+    action_plan = {"do": [], "avoid": [], "environment_checks": []}
+    for item in sorted(measured, key=lambda entry: entry.get("with_decision_growth") or 0, reverse=True)[:6]:
+        effect = item.get("with_decision_growth")
+        if effect is None:
+            continue
+        bucket = action_plan["do"] if effect > 0 else action_plan["avoid"]
+        bucket.append({
+            "action": item["decision"],
+            "basis": "measured from your supplied data" if item.get("icon") == "evidence" else "measured at peer companies in your supplied files",
+            "signal": effect,
+            "why": f"{item.get('matched_cases_count', 0)} dated episodes, "
+                   f"{item.get('estimated_growth_range', 'range unavailable')}",
+            "first_step": (item.get("implementation_steps") or [""])[0],
+        })
+    for move in playbook["moves"]:
+        if move["verdict"] == "prioritise":
+            action_plan["do"].append({
+                "action": move["name"],
+                "basis": "general sector playbook - not measured from your data",
+                "signal": None,
+                "why": move["why"],
+                "first_step": (move.get("check") or [""])[0],
+                "reference_band_pct": move["reference_band_pct"],
+            })
+        elif move["verdict"] in {"caution", "hold"}:
+            action_plan["avoid"].append({
+                "action": move["name"],
+                "basis": "general sector playbook - not measured from your data",
+                "signal": None,
+                "why": move["why"],
+                "first_step": move["risk"],
+            })
+    action_plan["environment_checks"] = [
+        f"Sector read: {playbook['sector']['shape']}",
+        f"Calendar: {'; '.join(playbook['sector']['calendar'])}",
+        f"Peer frame: {playbook['sector']['peer_frame']}",
+    ]
+    if position.get("crash_window"):
+        action_plan["environment_checks"].append(
+            f"Downside: the model puts the weakest stretch in {position['crash_window']}"
+            + (f" at {position['crash_prob_pct']}% probability" if position.get("crash_prob_pct") is not None else "")
+            + ". Set the review trigger and the cash floor before that window, not inside it."
+        )
+    if position.get("peak_window"):
+        action_plan["environment_checks"].append(
+            f"Timing: the strongest projected month is {position['peak_window']}. Commit capital and capacity ahead of it; "
+            "commitments scheduled after it inherit the flatter part of the path."
+        )
+    if standing_state_labels:
+        action_plan["environment_checks"].append(
+            "Evidence quality: " + str(len(standing_state_labels)) + " decision field(s) in this file are recorded on most "
+            "months, so they describe standing strategy rather than discrete events, and no outcome can be measured from them. "
+            "Dated, episodic decision records would unlock company-specific evidence here."
+        )
+
+    # Determine evidence status
+    has_company_evidence = any(rec.get("icon") == "evidence" for rec in recommendations)
+    has_peer_evidence = any(rec.get("icon") == "peer-evidence" for rec in recommendations)
+    has_playbook_advice = any(move["verdict"] in {"prioritise", "consider"} for move in playbook["moves"])
+
+    if not has_company_evidence and not has_peer_evidence and has_playbook_advice:
+        evidence_status = "general_playbook_only"
+        evidence_note = "No dated, episodic decision evidence was measurable from the supplied files, so the plan below comes from the general sector playbook: unnamed peer practice for this kind of organisation. These are hypotheses to test, not results from your data."
+    elif (has_company_evidence or has_peer_evidence) and has_playbook_advice:
+        evidence_status = "measured_plus_playbook"
+        evidence_note = "Cards marked measured come from dated records in the supplied files. The general sector playbook is listed alongside them and is labelled as a prior, never as a result."
+    else:
+        evidence_status = "available" if recommendations else "insufficient_dated_decision_evidence"
+        evidence_note = "Recommendations are derived only from dated decision records with usable follow-up prices. Results are observational associations, not causal effects."
+
     return {
         "company_id": c["company_id"],
         "recommendations": recommendations,
-        "evidence_status": "available" if recommendations else "insufficient_dated_decision_evidence",
-        "evidence_note": "Recommendations are derived only from dated decision records with usable follow-up prices. Results are observational associations, not causal effects.",
+        "general_playbook": playbook,
+        "action_plan": action_plan,
+        "standing_state_labels": standing_state_labels,
+        "position": position,
+        "evidence_status": evidence_status,
+        "evidence_note": evidence_note,
         "do_nothing_path": {
             "title": "Historical-data baseline market path",
             "estimated_growth": round(expected_change, 2) if expected_change is not None else None,
@@ -2411,7 +3185,7 @@ def get_source_provenance(key: str):
     """GET /sources/{key}: model version, seed, data date, provenance."""
     return {
         "key": key,
-        "model_version": "Crestfall Engine v3.0 (Calibrated DSGE / Counterfactual Hybrid)",
+        "model_version": "Crestfall Engine (DSGE / Counterfactual Hybrid)",
         "seed": 42,
         "data_date": "2026-10-25",
         "provenance_label": "SEC 10-K Audited Ground Truth & 8D Shock Vector Propagation",
