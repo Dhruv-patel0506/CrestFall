@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "cd scenario_intelligence_engine/frontend && npm install",
+  "buildCommand": "cd scenario_intelligence_engine/frontend && npm run build",
+  "outputDirectory": "scenario_intelligence_engine/frontend/dist",
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "http://13.55.43.139:8000/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
